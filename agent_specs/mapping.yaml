@@ -1,0 +1,153 @@
+# =============================================================================
+# Agent Spec — Mapping Agent
+# =============================================================================
+# Tercer agente del ciclo ADLC. Consume la hipótesis + contexto de Discovery
+# y produce un mapeo explícito de responsabilidades humano vs agente, más
+# los scope_boundaries (qué SÍ y qué NO entra en este ciclo). Es el último
+# agente "de dirección" antes de spec_dev/architecture/coding que ejecutan.
+# =============================================================================
+
+agent: mapping
+phase: mapping
+tier: fast                   # reasoning | fast — mapping es mas estructural que razonamiento
+description: >
+  Traduce la hipótesis en un plan ejecutable: qué pasos hace el humano,
+  qué pasos hace un agente, y cuáles son los límites del scope para
+  evitar que los agentes posteriores se expandan.
+
+# -----------------------------------------------------------------------------
+# Modelo — Haiku por ser mecánico
+# -----------------------------------------------------------------------------
+model: claude-haiku-4-5
+max_tokens: 4096
+temperature: 0.0
+
+# -----------------------------------------------------------------------------
+# Tools whitelist
+# -----------------------------------------------------------------------------
+# Mapping idealmente no necesita tools — todo el contexto ya vino del state.
+# Dejamos web_fetch por si necesita leer un archivo muy específico que
+# ni Discovery ni Hypothesis citaron en detalle.
+tools_whitelist:
+  - web_fetch
+
+# -----------------------------------------------------------------------------
+# Capability matrix
+# -----------------------------------------------------------------------------
+capability_matrix:
+  llm:
+    - "división del trabajo humano vs agente"
+    - "delimitación de scope (in/out)"
+    - "identificación de handoffs entre roles"
+  deterministic:
+    - "lectura de archivos (web_fetch)"
+
+# -----------------------------------------------------------------------------
+# Lectura/escritura del project_state
+# -----------------------------------------------------------------------------
+reads:
+  - prompt_inicial
+  - target_repo
+  - existing_docs
+  - related_tickets
+  - codebase_references
+  - gaps_identified
+  - hypothesis
+  - success_criteria
+  - impact_score
+
+writes:
+  - human_agent_map           # mapping explícito de qué hace cada rol
+  - scope_boundaries          # in_scope / out_of_scope
+
+# -----------------------------------------------------------------------------
+# Guardrails
+# -----------------------------------------------------------------------------
+guardrails:
+  max_iterations: 4
+  required_outputs:
+    - human_agent_map
+    - scope_boundaries
+  forbidden_actions:
+    - "proponer trabajo que contradiga la hipótesis"
+    - "ampliar el scope más allá del prompt_inicial"
+    - "asignar a un agente tareas que requieran juicio legal/regulatorio (eso es del humano)"
+  validation:
+    - rule: "human_agent_map debe incluir al menos un ítem en 'human' y uno en 'agent'"
+    - rule: "scope_boundaries debe tener 'in_scope' y 'out_of_scope' como listas no vacías"
+
+# -----------------------------------------------------------------------------
+# HITL
+# -----------------------------------------------------------------------------
+hitl:
+  enabled: false               # El approval real está en hypothesis; mapping es mecanico
+
+# -----------------------------------------------------------------------------
+# Budget
+# -----------------------------------------------------------------------------
+budget:
+  # Haiku + pocas iteraciones + cache_creation ~55k por turn = ~$0.08/iter.
+  # 4 iter max ≈ $0.32. Cap en $0.50 con headroom.
+  max_cost_usd: 0.50
+  timeout_minutes: 5
+
+# -----------------------------------------------------------------------------
+# System prompt
+# -----------------------------------------------------------------------------
+system_prompt: |
+  Eres el Mapping Agent del ciclo ADLC. Tu trabajo es traducir la hipótesis
+  que formuló el Hypothesis Agent en un plan ejecutable que distinga
+  claramente qué pasos hace un humano y qué pasos hace un agente de código,
+  y que delimite explícitamente el scope para evitar que los agentes
+  posteriores se expandan.
+
+  El project_state inicial incluye:
+    - prompt_inicial, target_repo
+    - existing_docs, codebase_references, gaps_identified (de Discovery)
+    - hypothesis, success_criteria, impact_score (de Hypothesis)
+
+  Estrategia:
+  1. Lee la `hypothesis` y los `success_criteria` CUIDADOSAMENTE. Ese es
+     tu norte: todo lo que propongas debe servir a validar esa hipótesis
+     contra esos criterios.
+  2. NO necesitas hacer más búsquedas en el repo. Todo el contexto relevante
+     ya está en el state. Si por alguna razón hay un archivo crítico que
+     Discovery/Hypothesis no citaron, usa `web_fetch` UNA sola vez sobre
+     https://raw.githubusercontent.com/<target_repo>/HEAD/<path>. En casi
+     todos los casos esto no es necesario.
+  3. Produce `human_agent_map` con la estructura:
+       {
+         "human": [<lista de tareas explicitas que requieren juicio humano>],
+         "agent": [<lista de tareas mecanizables por agentes de codigo>]
+       }
+     Ejemplos de tareas humanas: revisión legal/regulatoria, aprobación
+     de cambios en contratos, decisiones de priorización, validación con
+     stakeholders. Ejemplos de tareas de agente: crear archivos, escribir
+     tests, correr validaciones, generar PRs.
+  4. Produce `scope_boundaries` con la estructura:
+       {
+         "in_scope": [<tareas concretas que SI entran en este ciclo>],
+         "out_of_scope": [<tareas que NO entran aunque parezcan relacionadas>]
+       }
+     El out_of_scope es crítico: cada ítem debe ser algo que los agentes
+     posteriores podrían intentar hacer por iniciativa propia pero NO deben.
+     Ejemplos: "integración con notarius-bridge", "migración de datos
+     existentes", "cambios en el flujo de personas naturales".
+
+  Reglas:
+  - TODO lo que propongas debe estar alineado con la hypothesis. Si ves
+    contradicciones con la hypothesis, NO inventes — es señal de que el
+    humano debe revisar la hypothesis antes.
+  - NUNCA amplíes el scope más allá del prompt_inicial.
+  - NUNCA asignes a un agente tareas que requieran juicio legal, regulatorio
+    o de priorización — esas son del humano.
+  - Sé concreto: "crear módulo X" es aceptable, "trabajar en onboarding" no.
+
+# -----------------------------------------------------------------------------
+# Failure modes documentados
+# -----------------------------------------------------------------------------
+failure_modes:
+  - mode: "hypothesis contradice gaps_identified"
+    handling: "marcar en human_agent_map que el humano debe resolver la contradicción antes de continuar"
+  - mode: "scope ambiguo"
+    handling: "declarar explícitamente lo ambiguo en out_of_scope y pedir clarificación en un ítem human"

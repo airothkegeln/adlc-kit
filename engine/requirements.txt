@@ -1,0 +1,42 @@
+# =============================================================================
+# ADLC Engine — dependencias Python
+# =============================================================================
+# Mantener pinneado-flexible (>=) por compatibilidad con forks. Versiones
+# concretas resueltas en lock file (futuro: pip-compile o uv).
+# =============================================================================
+
+# --- Storage ---
+asyncpg>=0.29.0
+
+# --- LLM provider (Anthropic default — los demas son opcionales en forks) ---
+anthropic>=0.40.0
+
+# --- API ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+
+# --- Tools (Discovery agent y otros) ---
+# httpx para github_search, web_fetch, notion_search, linear_search.
+# Usamos httpx en vez de requests porque las tools son async (Tool.run).
+httpx>=0.27.0
+
+# --- Sandbox (Coding agent) ---
+# docker-py para hablar con el container sidecar adlc-sandbox via
+# /var/run/docker.sock. Usado por DockerSandbox en engine/sandbox/.
+docker>=7.0.0
+
+# --- Config + validation ---
+pydantic>=2.6.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# --- Observability ---
+structlog>=24.1.0
+
+# --- AWS (secrets manager + SES) ---
+boto3>=1.34.0
+
+# --- Tests ---
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

@@ -1,0 +1,163 @@
+# =============================================================================
+# ADLC Platform — Stack local
+# =============================================================================
+# Levanta Postgres + el engine + la UI sin necesidad de AWS.
+# Útil para desarrollo, demos y forks que no tienen acceso a AWS.
+#
+# Uso:
+#   cp .env.example .env
+#   cp config/adlc.config.example.yaml config/adlc.config.yaml
+#   # editar .env y config/adlc.config.yaml con tu LLM API key
+#   docker-compose up
+#
+# Servicios:
+#   postgres   → 5432  (state store)
+#   engine     → 8000  (FastAPI: REST + WebSocket)
+#   ui         → 5173  (Vite dev server)
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: adlc-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-adlc}
+      POSTGRES_USER: ${POSTGRES_USER:-adlc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adlc_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - adlc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adlc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: aplica migraciones y termina. Idempotente.
+  # NOTA: los SQL se montan como volumen read-only en vez de depender del
+  # `COPY . .` del Dockerfile. Esto evita que BuildKit cachee una version
+  # vieja del directorio de migrations cuando un usuario hace `git pull`
+  # sobre un clon existente — los archivos del host son siempre la fuente
+  # de verdad, sin necesidad de `--no-cache` ni `docker cp`.
+  migrate:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    container_name: adlc-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-adlc}
+      POSTGRES_USER: ${POSTGRES_USER:-adlc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adlc_dev_password}
+    volumes:
+      - ./engine/storage/migrations:/app/storage/migrations:ro
+    command: ["python", "-m", "storage.migrate"]
+    restart: "no"
+
+  # Servicio long-running del engine (FastAPI).
+  # NOTA: el modulo api.main:app aun no existe — se agrega en el Paso 5
+  # del buildout. Hasta entonces este servicio fallara al arrancar; comentar
+  # las lineas si necesitas un stack 100% sano antes del Paso 5.
+  engine:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    container_name: adlc-engine
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-adlc}
+      POSTGRES_USER: ${POSTGRES_USER:-adlc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adlc_dev_password}
+      LLM_PROVIDER: ${LLM_PROVIDER:-claude_cli}
+      LLM_API_KEY: ${LLM_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+      LINEAR_TOKEN: ${LINEAR_TOKEN:-}
+      ADLC_CONFIG_PATH: /app/config/adlc.config.yaml
+      ADLC_LOG_LEVEL: ${ADLC_LOG_LEVEL:-INFO}
+      # Auth: si se setea, todas las rutas exigen Authorization: Bearer.
+      # Vacia = modo dev abierto con WARNING ruidoso al startup. Generar
+      # con: openssl rand -hex 32. Ver .env.example.
+      ADLC_API_KEY: ${ADLC_API_KEY:-}
+      ADLC_CORS_ORIGINS: ${ADLC_CORS_ORIGINS:-*}
+      # HOME apunta al mount de ~/.claude del host. El claude_cli_provider
+      # lo usa para que el binario `claude` lea las creds OAuth de la
+      # suscripcion Max sin facturar API.
+      HOME: /root
+      # Nombre del container sidecar donde corren los coding agents.
+      # El engine le habla via docker.sock (ver mounts).
+      ADLC_SANDBOX_CONTAINER: adlc-sandbox
+      # Dir donde el engine persiste artefactos por run (tar.gz del
+      # workspace del sandbox, outputs de publish, etc). El sandbox NO
+      # lo monta — el engine pullea via docker API (container.get_archive).
+      ADLC_RUNS_DIR: /data/runs
+    command: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - ./engine:/app
+      - ./config:/app/config:ro
+      - ./agent_specs:/app/agent_specs:ro
+      - adlc_runs:/data/runs
+      # Mount de las creds Claude Max del host (read-only).
+      # Pre-requisito: correr `claude login` en el HOST antes de docker compose up.
+      # Si tu provider activo es `anthropic` (API key), podes comentar esta linea.
+      - ${CLAUDE_HOME:-~/.claude}:/root/.claude:ro
+      - ${CLAUDE_JSON:-~/.claude.json}:/root/.claude.json:ro
+      # Docker socket: el engine usa docker-py para ejecutar comandos dentro
+      # del container `adlc-sandbox`. ATENCIÓN: montar el socket da control
+      # total de docker al engine (vector de escape del container conocido).
+      # Aceptable en dev local; en prod/cloud reemplazar por servicio
+      # managed (E2B/Daytona/Modal) o socket proxy restrictivo.
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+
+  # Sidecar: container aislado donde corren los coding agents.
+  # El engine le habla via docker.sock (docker SDK Python). NO tiene acceso
+  # a .env del engine, ni a postgres, ni a las creds de Claude. Red separada
+  # (sandbox_net) para que no vea los demás servicios del compose.
+  # Salida a internet disponible solo para git clone / pip install.
+  sandbox:
+    build:
+      context: ./engine/sandbox/image
+      dockerfile: Dockerfile
+    container_name: adlc-sandbox
+    command: ["tail", "-f", "/dev/null"]
+    working_dir: /workspace
+    volumes:
+      - sandbox_workspace:/workspace
+    networks:
+      - sandbox_net
+    restart: unless-stopped
+
+  ui:
+    image: node:20-alpine
+    container_name: adlc-ui
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_ENGINE_URL: http://localhost:8000
+
+volumes:
+  adlc_pgdata:
+  sandbox_workspace:
+  adlc_runs:
+
+networks:
+  sandbox_net:
+    driver: bridge

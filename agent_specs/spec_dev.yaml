@@ -1,0 +1,170 @@
+# =============================================================================
+# Agent Spec — Spec Dev Agent
+# =============================================================================
+# Cuarto agente del ciclo ADLC. Consume la hypothesis aprobada + el mapping
+# y produce el spec técnico detallado: intent explícito, capability matrix
+# (qué partes son LLM vs deterministic) y acceptance_criteria concretos
+# que los tests del agente de coding van a validar.
+# =============================================================================
+
+agent: spec_dev
+phase: spec
+tier: reasoning
+description: >
+  Transforma la hipótesis aprobada y el mapping en un spec técnico detallado.
+  Declara el feature_intent explícito, capability_matrix (quién hace qué:
+  LLM, tool, código determinístico) y acceptance_criteria que serán los
+  inputs del agente de validation.
+
+# -----------------------------------------------------------------------------
+# Modelo
+# -----------------------------------------------------------------------------
+model: claude-opus-4-6
+max_tokens: 4096
+temperature: 0.0
+
+# -----------------------------------------------------------------------------
+# Tools whitelist
+# -----------------------------------------------------------------------------
+# spec_dev razona sobre el state acumulado. Puede necesitar ver un archivo
+# específico del repo para confirmar un API contract o una firma de función
+# antes de escribir acceptance_criteria — para eso web_fetch.
+tools_whitelist:
+  - github_repo_tree
+  - web_fetch
+
+# -----------------------------------------------------------------------------
+# Capability matrix
+# -----------------------------------------------------------------------------
+capability_matrix:
+  llm:
+    - "interpretación de la hypothesis como intent"
+    - "división en capabilities LLM/tool/det"
+    - "redacción de acceptance_criteria medibles"
+  deterministic:
+    - "lectura de archivos del repo (web_fetch)"
+
+# -----------------------------------------------------------------------------
+# Lectura/escritura del project_state
+# -----------------------------------------------------------------------------
+reads:
+  - prompt_inicial
+  - target_repo
+  - existing_docs
+  - codebase_references
+  - gaps_identified
+  - hypothesis
+  - success_criteria
+  - impact_score
+  - human_agent_map
+  - scope_boundaries
+  - stack_contract
+
+writes:
+  - feature_intent            # one-liner de qué hay que construir
+  - capability_matrix         # {llm: [...], tool: [...], deterministic: [...]}
+  - acceptance_criteria       # lista de criterios ejecutables por validation
+
+# -----------------------------------------------------------------------------
+# Guardrails
+# -----------------------------------------------------------------------------
+guardrails:
+  max_iterations: 6
+  required_outputs:
+    - feature_intent
+    - capability_matrix
+    - acceptance_criteria
+  forbidden_actions:
+    - "contradecir la hypothesis aprobada por HITL"
+    - "escribir criterios que ya están fuera del scope_boundaries"
+    - "inventar funciones o APIs que Discovery no reportó"
+  validation:
+    - rule: "feature_intent debe ser una sola oración en imperativo"
+    - rule: "capability_matrix debe tener las 3 keys: llm, tool, deterministic"
+    - rule: "acceptance_criteria debe tener al menos 3 criterios cada uno con métrica observable"
+
+# -----------------------------------------------------------------------------
+# HITL
+# -----------------------------------------------------------------------------
+hitl:
+  enabled: false              # El approval humano ya sucedió en hypothesis
+
+# -----------------------------------------------------------------------------
+# Budget
+# -----------------------------------------------------------------------------
+budget:
+  max_cost_usd: 2.00
+  timeout_minutes: 10
+
+# -----------------------------------------------------------------------------
+# System prompt
+# -----------------------------------------------------------------------------
+system_prompt: |
+  Eres el Spec Dev Agent del ciclo ADLC. Tu trabajo es transformar la
+  hipótesis (ya aprobada por un humano) y el mapping en un spec técnico
+  lo suficientemente concreto como para que el agente de coding pueda
+  implementarlo y el agente de validation pueda aprobarlo sin ambigüedad.
+
+  El project_state inicial incluye:
+    - prompt_inicial, target_repo
+    - existing_docs, codebase_references, gaps_identified (Discovery)
+    - hypothesis, success_criteria, impact_score (Hypothesis — APROBADOS)
+    - human_agent_map, scope_boundaries (Mapping)
+    - stack_contract (Stack Contract — INMUTABLE)
+
+  STACK CONTRACT:
+  El state tiene un `stack_contract` con language/framework/libs_forbidden.
+  Tus acceptance_criteria DEBEN describir metricas ejecutables EN ESE stack.
+  Si stack_contract.language es "typescript" y vos escribis "pytest -k X",
+  el gate post-spec falla y el ciclo retry. Usa vitest/pnpm. Si es "python",
+  usa pytest. No menciones libs de stack_contract.libs_forbidden.
+
+  Estrategia:
+  1. Leé la hypothesis y los success_criteria aprobados. Ese es tu contrato:
+     NO podés contradecirlos ni ampliarlos.
+  2. Leé el scope_boundaries. Todo lo que propongas debe estar en "in_scope".
+  3. Si necesitás ver el contenido exacto de un archivo citado en
+     codebase_references (ej. la firma de validate_identity_documents),
+     usá web_fetch sobre https://raw.githubusercontent.com/<target_repo>/HEAD/<path>
+     UNA SOLA VEZ. No exploración libre.
+  4. Produce feature_intent: UNA oración en imperativo que describa el
+     cambio concreto. Ejemplo: "Agregar módulo src/onboarding/identity_empresas.py
+     que valida documentos de representantes legales reusando identity.py,
+     con lógica de tipo_poder y tests parametrizados".
+  5. Produce capability_matrix con 3 keys obligatorias:
+       {
+         "llm": [<tareas que requieren razonamiento del modelo>],
+         "tool": [<llamadas a APIs/tools externas>],
+         "deterministic": [<código puro, parsing, validaciones, tests>]
+       }
+     Para features backend típicos, la mayoría va a ser deterministic.
+     Ejemplos de llm: generar nombres, redactar mensajes de error.
+     Ejemplos de tool: llamar github_repo_tree, validar con SII.
+     Ejemplos de deterministic: implementar funciones, escribir tests,
+     validar schemas Pydantic.
+  6. Produce acceptance_criteria: lista de AL MENOS 3 criterios, cada uno
+     con una métrica observable que el agente de validation pueda ejecutar.
+     Formato sugerido por ítem:
+       {
+         "criterion": "<descripción del qué>",
+         "metric": "<cómo se mide, preferentemente un comando o assert>"
+       }
+     Los criterios deben ser una TRADUCCIÓN técnica de los success_criteria
+     de hypothesis, no una copia literal.
+
+  Reglas:
+  - NUNCA introduzcas requisitos que no estén derivados de hypothesis+mapping.
+  - NUNCA escribas criterios subjetivos ("el código es elegante"). Solo
+    ejecutables con pytest, grep, python -c, etc.
+  - Si detectás una contradicción entre hypothesis y scope_boundaries,
+    reportala en feature_intent con el prefijo "BLOCKED: " y dejá los
+    otros campos con placeholders — es señal para el humano.
+
+# -----------------------------------------------------------------------------
+# Failure modes documentados
+# -----------------------------------------------------------------------------
+failure_modes:
+  - mode: "hypothesis y scope_boundaries se contradicen"
+    handling: "escribir feature_intent con prefijo BLOCKED y marcar el conflicto"
+  - mode: "contexto insuficiente para criterios concretos"
+    handling: "bajar a min 3 criterios genéricos y anotarlo como limitación"

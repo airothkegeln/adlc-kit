@@ -1,0 +1,144 @@
+# =============================================================================
+# Infra Constraint File — MACHBank / MACHBANK
+# =============================================================================
+# Este archivo describe el stack tecnológico target de un cliente. El
+# Architecture agent lo lee como source of truth: NUNCA propone cambios al
+# stack base, solo trabaja dentro de estas restricciones.
+#
+# El ciclo ADLC cubre back + front + UX/UI, así que este archivo declara
+# las TRES dimensiones más la infra existente.
+#
+# Para crear un nuevo stack target, copia este archivo a
+# config/infra_constraints/<nombre>.yaml y actívalo en adlc.config.yaml
+# bajo `infra_constraints.active`.
+# =============================================================================
+
+target:
+  name: "MACHBank / MACHBANK"
+  description: >
+    Banco digital con app móvil nativa (MACHBank) y banca tradicional (MACHBANK).
+    Stack regulado por CMF Chile, con foco en compliance y core bancario.
+  owner_team: "machbank-platform"
+  contact: "platform@machbank.example.cl"
+
+# -----------------------------------------------------------------------------
+# Backend
+# -----------------------------------------------------------------------------
+backend:
+  language: "Java"
+  frameworks:
+    - "Spring Boot 3.x"
+    - "Spring Security"
+  api_style: "REST + GraphQL para BFF móvil"
+  patterns:
+    - "Hexagonal architecture"
+    - "CQRS para operaciones core bancarias"
+    - "Saga pattern para transferencias distribuidas"
+  databases:
+    primary: "Oracle 19c (core bancario)"
+    secondary: "PostgreSQL 15 (servicios satelite)"
+    cache: "Redis 7"
+  message_bus: "IBM MQ (legacy) + Kafka (nuevos servicios)"
+  observability:
+    logs: "Splunk"
+    metrics: "Prometheus + Grafana corporativo"
+    tracing: "OpenTelemetry → Dynatrace"
+  constraints:
+    - "Cálculos financieros DEBEN ser determinísticos (no LLM en hot path)"
+    - "Toda llamada a core bancario pasa por capa de idempotencia"
+    - "Compliance CMF: trazabilidad completa de transacciones por 7 años"
+    - "PII encriptada at-rest con KMS corporativo"
+
+# -----------------------------------------------------------------------------
+# Frontend
+# -----------------------------------------------------------------------------
+frontend:
+  mobile:
+    ios:
+      language: "Swift 5.9"
+      framework: "SwiftUI + UIKit (legacy screens)"
+      min_version: "iOS 15"
+      architecture: "MVVM + Coordinator"
+    android:
+      language: "Kotlin"
+      framework: "Jetpack Compose + XML legacy"
+      min_sdk: 26
+      architecture: "MVVM + Clean Architecture"
+  web:
+    framework: "React 18 + TypeScript"
+    bundler: "Vite"
+    state: "Zustand"
+    routing: "React Router 6"
+  constraints:
+    - "Mobile-first siempre. Web es secundario."
+    - "Sin librerías de terceros que no pasen security review"
+    - "Bundle size mobile < 50MB total"
+
+# -----------------------------------------------------------------------------
+# UX / UI Kit
+# -----------------------------------------------------------------------------
+ux_ui_kit:
+  name: "MACHBank Design System"
+  version: "3.2"
+  source_of_truth: "Figma — figma.com/file/MACHDS"
+  tokens:
+    colors:
+      primary: "#00C2FF"     # MACHBank cyan
+      secondary: "#0A1F44"   # MACHBANK navy
+      success: "#00B894"
+      danger: "#E63946"
+      warning: "#FFB400"
+    typography:
+      base_font: "Inter"
+      scale: "1.25 (major third)"
+    spacing_unit: 8
+    radius_default: 12
+  components:
+    library_ios: "MachDS-iOS Swift package"
+    library_android: "MachDS-Android Maven artifact"
+    library_web: "@machbank/design-system npm package"
+  accessibility:
+    standard: "WCAG 2.1 AA"
+    rtl: false
+  constraints:
+    - "Cualquier componente nuevo debe partir del Design System"
+    - "Si no existe en el kit, abrir ticket al equipo de diseño antes de codear"
+    - "Iconografía: solo MACHBank Iconset, no third-party"
+
+# -----------------------------------------------------------------------------
+# Infraestructura
+# -----------------------------------------------------------------------------
+infrastructure:
+  cloud: "AWS (cuenta corporativa MACHBANK)"
+  regions:
+    primary: "us-east-1"
+    dr: "us-west-2"
+  compute:
+    - "ECS Fargate (microservicios)"
+    - "EKS (servicios de alta concurrencia)"
+    - "Lambda (event-driven)"
+  cicd: "GitHub Actions + ArgoCD"
+  iac: "Terraform"
+  secrets: "AWS Secrets Manager + Vault corporativo"
+  network:
+    vpn_required: true
+    private_subnets_only: true
+  constraints:
+    - "Todo deploy a producción requiere aprobación de SRE + Security"
+    - "No se permite acceso directo a internet desde compute"
+    - "Imágenes Docker deben venir del ECR corporativo (no Docker Hub)"
+
+# -----------------------------------------------------------------------------
+# Compliance / regulatorio
+# -----------------------------------------------------------------------------
+compliance:
+  regulators:
+    - "CMF Chile (Comisión para el Mercado Financiero)"
+    - "UAF (Unidad de Análisis Financiero)"
+  certifications:
+    - "ISO 27001"
+    - "PCI-DSS Level 1"
+  data_residency: "Chile (datos PII de clientes finales)"
+  audit:
+    log_retention_years: 7
+    immutable_audit_trail: true

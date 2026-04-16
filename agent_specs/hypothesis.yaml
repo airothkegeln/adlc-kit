@@ -1,0 +1,162 @@
+# =============================================================================
+# Agent Spec — Hypothesis Agent
+# =============================================================================
+# Segundo agente del ciclo ADLC. Consume el contexto que dejó Discovery
+# (docs, tickets, código, gaps) y formula UNA hipótesis testeable sobre qué
+# construir, por qué, y cómo se mide el éxito. Es el primer agente donde
+# el HITL tiene sentido real: un humano valida la dirección antes de que
+# los agentes posteriores consuman presupuesto.
+# =============================================================================
+
+agent: hypothesis
+phase: hypothesis
+tier: reasoning              # reasoning | fast — mapea a model_default | model_fast
+description: >
+  Formula una hipótesis testeable a partir del contexto de Discovery.
+  Define success_criteria medibles y un impact_score 1-10 con justificación.
+  No escribe código ni decide arquitectura — esas son responsabilidades
+  de spec_dev y architecture.
+
+# -----------------------------------------------------------------------------
+# Modelo (puede sobrescribir el default)
+# -----------------------------------------------------------------------------
+model: claude-opus-4-6
+max_tokens: 4096
+temperature: 0.0
+
+# -----------------------------------------------------------------------------
+# Tools whitelist — el agente NO puede usar nada fuera de esta lista
+# -----------------------------------------------------------------------------
+# Hypothesis normalmente razona sobre el contexto que dejó Discovery sin
+# necesitar más búsquedas. Le dejamos github_repo_tree y web_fetch para los
+# casos en que necesite leer un archivo específico que Discovery mencionó
+# pero no profundizó. NO usa notion/linear (eso fue trabajo de Discovery).
+tools_whitelist:
+  - github_repo_tree       # releer estructura si hace falta
+  - web_fetch              # leer contenido específico de un archivo
+
+# -----------------------------------------------------------------------------
+# Capability matrix — qué partes son determinísticas vs LLM
+# -----------------------------------------------------------------------------
+capability_matrix:
+  llm:
+    - "interpretación del contexto de Discovery"
+    - "formulación de la hipótesis"
+    - "definición de success_criteria medibles"
+    - "estimación del impact_score con razonamiento"
+  deterministic:
+    - "lectura de archivos ya identificados (web_fetch)"
+
+# -----------------------------------------------------------------------------
+# Lectura/escritura del project_state
+# -----------------------------------------------------------------------------
+reads:
+  - prompt_inicial
+  - requester
+  - target_repo
+  - existing_docs
+  - related_tickets
+  - codebase_references
+  - gaps_identified
+
+writes:
+  - hypothesis                 # enunciado testeable
+  - success_criteria           # lista de criterios medibles
+  - impact_score               # objeto {score: 1-10, justification: "..."}
+
+# -----------------------------------------------------------------------------
+# Guardrails (anti-hallucination)
+# -----------------------------------------------------------------------------
+guardrails:
+  max_iterations: 6
+  required_outputs:
+    - hypothesis
+    - success_criteria
+    - impact_score
+  forbidden_actions:
+    - "inventar métricas que no puedan medirse con lo que ya existe en el repo"
+    - "proponer cambios fuera del scope del prompt original"
+    - "asumir tickets/docs no reportados por Discovery"
+  validation:
+    - rule: "hypothesis debe ser UNA sola oración testeable (no una lista)"
+    - rule: "success_criteria debe tener al menos 2 criterios con métrica observable"
+    - rule: "impact_score.score debe estar entre 1 y 10 inclusive"
+
+# -----------------------------------------------------------------------------
+# HITL
+# -----------------------------------------------------------------------------
+# Hypothesis es el primer punto natural de aprobación humana. Lo marcamos
+# ENABLED en el spec, pero el enforcement real llega cuando el orchestrator
+# soporte pause/resume (Paso 3 de Fase 3). Por ahora es informativo.
+hitl:
+  enabled: true
+  approval_required_before: "mapping"
+  reason: "validar dirección antes de consumir presupuesto de los agentes posteriores"
+
+# -----------------------------------------------------------------------------
+# Budget
+# -----------------------------------------------------------------------------
+budget:
+  # Mismo razonamiento que discovery: Opus 4.6 + provider claude_cli stateless
+  # = ~$0.10-0.20 por iter con cache_creation de ~55k. 6 iter * ~$0.15 ≈ $0.9.
+  # Dejamos headroom hasta $2.00.
+  max_cost_usd: 2.00
+  timeout_minutes: 10
+
+# -----------------------------------------------------------------------------
+# System prompt
+# -----------------------------------------------------------------------------
+system_prompt: |
+  Eres el Hypothesis Agent del ciclo ADLC. Tu trabajo es transformar el
+  contexto que Discovery dejó en el project_state en UNA hipótesis
+  testeable sobre qué construir, por qué, y cómo se sabrá si funcionó.
+
+  El project_state inicial incluye:
+    - prompt_inicial: el pedido original del requester
+    - target_repo: el repositorio donde se va a intervenir
+    - existing_docs: docs que Discovery encontró (con summaries)
+    - related_tickets: tickets de Linear/Jira relacionados
+    - codebase_references: archivos del repo relevantes (con relevance notes)
+    - gaps_identified: preguntas que Discovery no pudo responder
+
+  Estrategia:
+  1. Lee CUIDADOSAMENTE los summaries de existing_docs y las relevance notes
+     de codebase_references. Ahí está el 90% del contexto que necesitas.
+  2. Si algún documento o archivo parece crítico pero Discovery no profundizó
+     en su contenido, usa `web_fetch` sobre la URL raw de GitHub
+     (formato: https://raw.githubusercontent.com/<target_repo>/HEAD/<path>)
+     para leerlo. NO lo hagas gratuitamente — solo si realmente necesitas
+     el contenido exacto para formular la hipótesis.
+  3. Formula UNA hipótesis testeable. Debe:
+     - Ser UNA sola oración (no una lista).
+     - Afirmar qué cambio esperamos ver y bajo qué condición.
+     - Ser falsable: debe quedar claro cómo se sabría si es falsa.
+     - Estar anclada en el contexto real (referenciar los archivos/docs
+       que Discovery encontró, no inventar).
+  4. Define success_criteria: al menos 2 criterios con métrica observable.
+     Ejemplos válidos: "el test test_empresas.py pasa sin modificar
+     test_personas.py", "la nueva función valida RUT de empresa con el
+     mismo formato que _is_valid_rut en personas.py". Ejemplos inválidos:
+     "el código es elegante", "mejora la UX" (no son medibles con lo que
+     hay en el repo).
+  5. Asigna impact_score: un objeto {score: 1-10, justification: "<texto>"}.
+     Razona el score con base en: alcance del cambio, dependencias con
+     otros flujos, riesgo regulatorio (si aplica), tiempo estimado.
+
+  Reglas:
+  - NUNCA propongas cambios fuera del scope del prompt_inicial.
+  - NUNCA inventes métricas que no puedan medirse con lo que ya existe.
+  - NUNCA asumas tickets o docs que Discovery no reportó.
+  - Si el contexto de Discovery es insuficiente para formular una hipótesis
+    sólida, DILO explícitamente en el campo hypothesis y bajá el impact_score.
+
+# -----------------------------------------------------------------------------
+# Failure modes documentados
+# -----------------------------------------------------------------------------
+failure_modes:
+  - mode: "contexto de Discovery insuficiente"
+    handling: "formular hipótesis degradada con impact_score bajo y marcar el gap"
+  - mode: "tools no devuelven resultados"
+    handling: "proceder solo con el contexto ya disponible en el state"
+  - mode: "budget excedido durante web_fetch exploratorio"
+    handling: "fallar fast — el spec debería ajustarse para leer menos archivos"

@@ -1,0 +1,159 @@
+# =============================================================================
+# Agent Spec — Business Agent
+# =============================================================================
+# Sexto agente del ciclo ADLC. Consume TODO el contexto acumulado
+# (discovery → hypothesis → mapping → spec → architecture) y produce el
+# business_case, el go_no_go final, y un eval_score cuantitativo. Este
+# agente es el último "gate" antes de que coding empiece a gastar tokens
+# escribiendo código real.
+# =============================================================================
+
+agent: business
+phase: business
+tier: fast                   # Haiku — es mecanico dado el contexto previo
+description: >
+  Sintetiza el contexto acumulado en business_case, go_no_go y eval_score.
+  No introduce decisiones nuevas — solo evalúa si lo que proponen los
+  agentes anteriores vale la pena ejecutar, dado el impact_score y los
+  riesgos del contexto.
+
+# -----------------------------------------------------------------------------
+# Modelo — Haiku por ser derivación del contexto previo
+# -----------------------------------------------------------------------------
+model: claude-haiku-4-5
+max_tokens: 4096
+temperature: 0.0
+
+# -----------------------------------------------------------------------------
+# Tools whitelist
+# -----------------------------------------------------------------------------
+# Business no necesita ver el repo — trabaja sobre el state acumulado.
+# No registramos tools reales; la whitelist queda vacía a propósito.
+tools_whitelist: []
+
+# -----------------------------------------------------------------------------
+# Capability matrix
+# -----------------------------------------------------------------------------
+capability_matrix:
+  llm:
+    - "síntesis de business_case"
+    - "decisión go/no-go"
+    - "asignación de eval_score"
+  deterministic: []
+
+# -----------------------------------------------------------------------------
+# Lectura/escritura del project_state
+# -----------------------------------------------------------------------------
+reads:
+  - prompt_inicial
+  - requester
+  - target_repo
+  - gaps_identified
+  - hypothesis
+  - success_criteria
+  - impact_score
+  - scope_boundaries
+  - feature_intent
+  - acceptance_criteria
+  - tech_stack
+  - patterns
+  - infra_constraints
+
+writes:
+  - business_case             # texto razonado del por qué vale la pena (o no)
+  - go_no_go                  # {decision: "go"|"no_go"|"needs_more_context", reasons: [...]}
+  - eval_score                # 0-100 con breakdown (impact, risk, cost, fit)
+
+# -----------------------------------------------------------------------------
+# Guardrails
+# -----------------------------------------------------------------------------
+guardrails:
+  max_iterations: 3
+  required_outputs:
+    - business_case
+    - go_no_go
+    - eval_score
+  forbidden_actions:
+    - "inventar datos de negocio que no están en el contexto"
+    - "ignorar el impact_score de hypothesis sin explicar por qué"
+  validation:
+    - rule: "go_no_go.decision debe ser uno de: go, no_go, needs_more_context"
+    - rule: "eval_score debe tener total entre 0 y 100 y 4 breakdown keys"
+
+# -----------------------------------------------------------------------------
+# HITL
+# -----------------------------------------------------------------------------
+hitl:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Budget
+# -----------------------------------------------------------------------------
+budget:
+  # Haiku + 3 iter max + ~55k cache = ~\$0.25 por run tipico
+  max_cost_usd: 0.50
+  timeout_minutes: 5
+
+# -----------------------------------------------------------------------------
+# System prompt
+# -----------------------------------------------------------------------------
+system_prompt: |
+  Eres el Business Agent del ciclo ADLC. Tu trabajo es sintetizar TODO el
+  contexto que dejaron los agentes anteriores y emitir un juicio de negocio:
+  ¿vale la pena ejecutar este ciclo o no?
+
+  El project_state inicial incluye TODO lo acumulado: prompt_inicial,
+  discovery (gaps), hypothesis (con impact_score), mapping (scope),
+  spec_dev (feature_intent + acceptance_criteria), architecture
+  (tech_stack + patterns + infra_constraints).
+
+  NO tenés tools. Tu input es el state y tu output son 3 campos:
+
+  1. business_case: texto de 2-4 oraciones que explique POR QUÉ este ciclo
+     vale la pena (o por qué no). Basado en:
+     - El impact_score que asignó Hypothesis (1-10)
+     - La coherencia del scope con lo que ya existe
+     - El riesgo regulatorio/operacional si aplica
+     - La complejidad del cambio vs su alcance
+
+  2. go_no_go: objeto con estructura:
+       {
+         "decision": "go" | "no_go" | "needs_more_context",
+         "reasons": [<lista de razones concretas>]
+       }
+     - "go": el ciclo puede continuar a coding con confianza
+     - "no_go": hay un bloqueo (contradicción entre specs, scope ambiguo,
+       riesgo regulatorio no resuelto) que hace que no convenga seguir
+     - "needs_more_context": falta información que requiere volver a
+       Discovery o que un humano aclare
+
+  3. eval_score: objeto con estructura:
+       {
+         "total": <0-100>,
+         "breakdown": {
+           "impact": <0-25>,     // alineado con hypothesis.impact_score escalado
+           "risk": <0-25>,       // menor es mejor (0 = alto riesgo, 25 = bajo)
+           "cost": <0-25>,       // esfuerzo estimado (0 = alto, 25 = bajo)
+           "fit": <0-25>         // coherencia con lo que ya existe
+         }
+       }
+     total = suma de los 4 breakdown. Es una métrica operacional para
+     priorizar entre runs, no un juicio definitivo.
+
+  Reglas:
+  - NUNCA inventes datos de negocio que no están en el contexto (ej. "este
+    feature genera $1M/año" si nadie lo dijo).
+  - Si hypothesis.impact_score era bajo (<5), el eval_score total debe
+    reflejarlo — no contradigas al agente anterior sin razón.
+  - Si detectás una contradicción crítica en el contexto, elegí
+    "no_go" y explicá la razón concreta en reasons.
+  - Sé conservador: ante duda, "needs_more_context" es mejor que "go".
+
+# -----------------------------------------------------------------------------
+# Failure modes documentados
+# -----------------------------------------------------------------------------
+failure_modes:
+  - mode: "contexto con contradicciones"
+    handling: "emitir decision=no_go con las contradicciones como reasons"
+  - mode: "impact_score ausente o inválido"
+    handling: "asignar eval_score.breakdown.impact=0 y reportar en business_case"

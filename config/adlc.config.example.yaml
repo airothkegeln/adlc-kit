@@ -1,0 +1,229 @@
+# =============================================================================
+# ADLC Platform — Configuración central
+# =============================================================================
+# Copia este archivo a `config/adlc.config.yaml` y completa los valores.
+# `adlc.config.yaml` está en .gitignore — NUNCA lo subas al repo.
+#
+# Para producción los secretos vienen de AWS Secrets Manager (ver sección
+# `secrets` más abajo). Para desarrollo local puedes ponerlos directo aquí.
+# =============================================================================
+
+tenant:
+  # Single-tenant por instalación. Si quieres multi-tenant, forkea y agrega
+  # un selector. Ver docs/architecture.md sección "Multi-tenant".
+  mode: single
+  name: "my-org"
+
+# -----------------------------------------------------------------------------
+# LLM Provider
+# -----------------------------------------------------------------------------
+# Adapter aislado en engine/llm/. Para agregar otro proveedor (OpenAI, Bedrock,
+# Mistral, modelos locales), implementa la interfaz LLMProvider y registralo.
+# Ver docs/adding_an_llm_provider.md
+# -----------------------------------------------------------------------------
+llm:
+  # Default: claude_cli — usa la suscripcion Claude Max via el binario
+  # `claude` del host, sin facturar API. Requiere `claude login` previo
+  # en el host (el mount de ~/.claude al container ya esta en docker-compose.yml).
+  # Este es el camino recomendado: cualquiera con Claude Max / Claude Code
+  # instalado puede correr el sistema sin pagar API.
+  #
+  # Alternativa: anthropic (API key paga). Seteala solo si no tenes Claude Max
+  # o preferis facturar por token. Exporta ANTHROPIC_API_KEY antes de
+  # run_local.sh y el script la inyecta en .env y en api_key abajo.
+  provider: claude_cli       # claude_cli | anthropic | openai | bedrock | local | ...
+  model_default: claude-opus-4-6
+  model_fast: claude-haiku-4-5-20251001   # usado por agent_specs que marcan tier=fast
+
+  # API key. Solo necesaria si provider=anthropic (u otro que facture API).
+  # Con provider=claude_cli esto se ignora — la auth viene del OAuth de `claude login`.
+  api_key: "REPLACE_ME_OR_USE_SECRETS_MANAGER"
+
+  # Config especifica del provider claude_cli (cuenta Claude Max via CLI).
+  # Solo relevante si arriba seteas provider: claude_cli.
+  #   binary           → ruta del binario `claude`. Default: busca en PATH.
+  #   home             → directorio con ~/.claude/ (creds OAuth). Default: $HOME del proceso.
+  #   timeout_seconds  → timeout por llamada al binario.
+  # Pre-requisito: `claude login` en la maquina host antes de `docker compose up`.
+  claude_cli:
+    binary: "claude"
+    home: "/root"
+    timeout_seconds: 600
+
+  # Rate limiting / budget caps. El orquestador detiene el run si se excede.
+  rate_limits:
+    requests_per_minute: 50
+    tokens_per_minute: 200000
+
+  budget:
+    # Costo máximo por run (USD). El run se aborta si lo excede.
+    max_cost_usd_per_run: 5.00
+    # Aviso al usuario cuando un run llega a este % del cap.
+    warn_at_percent: 80
+    # Costo máximo total por día (suma de todos los runs).
+    max_cost_usd_per_day: 50.00
+
+# -----------------------------------------------------------------------------
+# Storage del project_state
+# -----------------------------------------------------------------------------
+# Default: PostgreSQL. La capa está aislada en engine/storage/ — puedes
+# reemplazarla por DynamoDB, MongoDB, SQLite (single-user), etc.
+# Ver docs/adding_a_storage.md
+# -----------------------------------------------------------------------------
+storage:
+  driver: postgres           # postgres | sqlite | dynamodb | ...
+  postgres:
+    host: localhost
+    port: 5432
+    database: adlc
+    user: adlc
+    password: "REPLACE_ME"
+    ssl: false
+
+  # Retención del project_state.
+  # Los project_state pasan por DOS niveles de persistencia:
+  #   1. Postgres = estado vivo y trazas mientras corre el ciclo
+  #   2. Archivo en el repo target = artefacto final junto al código generado
+  retention:
+    # Días que un run completo (terminado o fallido) vive en Postgres antes
+    # de ser archivado. Después, queda solo en el repo del artefacto.
+    db_retention_days: 30
+
+    # Si true, al cerrar un run el orquestador commitea el project_state
+    # final al repo donde vive el código generado, en la ruta:
+    #   .adlc/runs/<run_id>/project_state.json
+    #   .adlc/runs/<run_id>/project_state.md
+    persist_to_target_repo: true
+    target_repo_path: ".adlc/runs"
+
+# -----------------------------------------------------------------------------
+# Orquestador
+# -----------------------------------------------------------------------------
+# Default: orquestador propio en Python con Postgres como cola/estado.
+# Para flujos de larga duración o alta concurrencia, considera Temporal,
+# Inngest o Trigger.dev. Interfaz aislada en engine/orchestrator/base.py.
+# -----------------------------------------------------------------------------
+orchestrator:
+  driver: simple             # simple | temporal | inngest | trigger
+  heartbeat_interval_seconds: 10
+  watchdog_timeout_seconds: 120
+  max_concurrent_runs: 3
+
+# -----------------------------------------------------------------------------
+# Sandbox de ejecución (coding agents)
+# -----------------------------------------------------------------------------
+# Default: Docker local. Para producción reemplaza por E2B, Daytona, Modal,
+# Firecracker, etc. Interfaz en engine/sandbox/base.py.
+#
+# Recomendación de hardware:
+#   - Solo agentes de razonamiento (Discovery..Business): t3.medium OK
+#   - Con coding agents activos: mínimo t3.xlarge (4 vCPU, 16 GB RAM)
+# -----------------------------------------------------------------------------
+sandbox:
+  driver: docker             # docker | e2b | daytona | modal | ...
+  docker:
+    image: adlc/coding-sandbox:latest
+    memory_limit_mb: 2048
+    cpu_quota: 100000
+    network: none            # sin red salvo proxy a GitHub
+    timeout_seconds: 600
+
+# -----------------------------------------------------------------------------
+# HITL (Human-in-the-loop) transports
+# -----------------------------------------------------------------------------
+hitl:
+  default_timeout_hours: 4   # auto-avance si no hay respuesta
+  transports:
+    - web                    # UI sirve checkpoints en /hitl/:id
+    - email                  # AWS SES
+  email:
+    from_address: "adlc@example.com"
+    ses_region: "us-east-1"
+    magic_link_ttl_minutes: 60
+
+# -----------------------------------------------------------------------------
+# Observabilidad
+# -----------------------------------------------------------------------------
+# Default: structlog + métricas en Postgres. Reemplazable por Langfuse,
+# LangSmith, Phoenix. Interfaz en engine/observability/base.py.
+# -----------------------------------------------------------------------------
+observability:
+  driver: structlog          # structlog | langfuse | langsmith | phoenix
+  log_level: INFO
+  log_format: json
+  # Trazar versiones (commit SHA del agent_spec usado, sin afectar performance)
+  trace_spec_version: true
+
+# -----------------------------------------------------------------------------
+# Secrets (resolución de credenciales)
+# -----------------------------------------------------------------------------
+secrets:
+  # local = lee de este archivo o de .env
+  # aws_secrets_manager = lee de AWS, path: adlc/{tenant}/{key}
+  source: local              # local | aws_secrets_manager
+  aws:
+    region: "us-east-1"
+    path_prefix: "adlc/my-org"
+
+# -----------------------------------------------------------------------------
+# Infra constraints (referencia del stack target)
+# -----------------------------------------------------------------------------
+# Cada constraint file describe un stack target (back, front, UX/UI kit, infra).
+# El Architecture agent los lee como source of truth.
+# -----------------------------------------------------------------------------
+infra_constraints:
+  active: machbank
+  files:
+    machbank: "config/infra_constraints/machbank.yaml"
+
+# -----------------------------------------------------------------------------
+# Tools (Discovery agent y otros)
+# -----------------------------------------------------------------------------
+# El factory en engine/agents/tools/factory.py lee este bloque y construye
+# el ToolRegistry. Si una tool no tiene credenciales o esta enabled: false,
+# se registra como DisabledTool — el agente arranca igual, pero si el LLM
+# intenta usarla recibe un error claro como tool_result.
+#
+# Para credenciales en prod usar AWS Secrets Manager (ver bloque secrets).
+# En dev se leen del env del proceso (los nombres de env vars son
+# configurables via `token_env`).
+tools:
+  github_search:
+    enabled: true
+    token_env: GITHUB_TOKEN          # PAT clasico, scope `repo` para privados
+    default_per_page: 5
+    timeout_seconds: 15
+  notion_search:
+    enabled: true
+    token_env: NOTION_TOKEN
+    default_page_size: 5
+    timeout_seconds: 15
+  linear_search:
+    enabled: true
+    token_env: LINEAR_TOKEN
+    default_first: 5
+    timeout_seconds: 15
+  web_fetch:
+    enabled: true
+    # Allowlist anti-SSRF. La tool rechaza URLs cuyo host no esta aca
+    # (match exacto o subdominio). Editar segun lo que el agente necesite.
+    allowed_domains:
+      - github.com
+      - raw.githubusercontent.com
+      - docs.github.com
+      - notion.so
+      - linear.app
+    max_response_kb: 50
+    timeout_seconds: 15
+
+# -----------------------------------------------------------------------------
+# GitHub (para Discovery + Coding agents)
+# -----------------------------------------------------------------------------
+github:
+  # GitHub App preferido sobre PAT. Si usas PAT en dev, ponlo aquí.
+  app_id: ""
+  installation_id: ""
+  private_key_path: ""
+  # PAT fallback (solo dev)
+  token: "REPLACE_ME"
+  default_repo: "owner/repo"

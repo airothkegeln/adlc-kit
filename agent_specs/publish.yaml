@@ -1,0 +1,200 @@
+# =============================================================================
+# Agent Spec — Publish Agent
+# =============================================================================
+# Noveno agente del ciclo ADLC, corre DESPUES de validation. Toma el
+# artefacto del coding phase (tar.gz del workspace, persistido en
+# /data/runs/<run_id>/coding/workspace.tar.gz) y lo publica a GitHub:
+#
+#   - greenfield → crea un repo publico nuevo en airothkegeln/ y pushea
+#     el workspace como commit inicial. Escribe repo_url al state.
+#   - brownfield → clona target_repo, crea branch adlc/<run_id_short>,
+#     aplica el workspace, pushea y abre un PR. Escribe pr_url al state.
+#
+# Gate: el cycle_executor NO ejecuta publish si validation declaro
+# deploy_status=blocked/failed. La skip_if_blocked esta en
+# engine/agents/cycle_executor.py (ver _should_skip_publish).
+#
+# Una sola tool (git_publish). El LLM decide greenfield vs brownfield
+# mirando target_repo del state y llama la tool UNA vez. Iteraciones
+# bajas (2) porque no hay razon para loopear — o publica o falla.
+# =============================================================================
+
+agent: publish
+phase: publish
+tier: fast                   # Haiku — decision simple, no razonamiento pesado
+description: >
+  Publica el artefacto del coding a GitHub. Greenfield crea repo nuevo;
+  brownfield abre PR contra target_repo. Gate post-validation.
+
+# -----------------------------------------------------------------------------
+# Modelo
+# -----------------------------------------------------------------------------
+model: claude-haiku-4-5
+max_tokens: 2048
+temperature: 0.0
+
+# -----------------------------------------------------------------------------
+# Tools whitelist
+# -----------------------------------------------------------------------------
+# UNA sola tool. El agente no necesita mas que git_publish; el artefacto
+# ya existe en disco desde la phase coding.
+tools_whitelist:
+  - git_publish
+
+# -----------------------------------------------------------------------------
+# Capability matrix
+# -----------------------------------------------------------------------------
+capability_matrix:
+  llm:
+    - "decidir greenfield vs brownfield segun target_repo"
+    - "generar commit_message y pr_title/body a partir del feature_intent"
+    - "elegir slug para greenfield a partir de prompt_inicial"
+  deterministic:
+    - "creacion del repo / PR en GitHub"
+    - "git clone/commit/push"
+
+# -----------------------------------------------------------------------------
+# Lectura/escritura del project_state
+# -----------------------------------------------------------------------------
+reads:
+  - prompt_inicial
+  - target_repo
+  - feature_intent
+  - acceptance_criteria
+  - files_modified
+  - unit_tests
+  - deploy_status
+
+writes:
+  - repo_url                 # greenfield
+  - pr_url                   # brownfield
+  - publish_status           # "published" | "failed" | "skipped"
+  - publish_details          # {mode, branch, commit_sha, owner, repo}
+
+# -----------------------------------------------------------------------------
+# Guardrails
+# -----------------------------------------------------------------------------
+guardrails:
+  max_iterations: 2
+  required_outputs:
+    - publish_status
+    - publish_details
+  forbidden_actions:
+    - "invocar git_publish mas de una vez exitosamente (dos PRs/repos por run es error)"
+    - "elegir mode=brownfield si target_repo esta vacio o es 'greenfield'"
+  validation:
+    - rule: "publish_status debe ser 'published' o 'failed'"
+    - rule: "si mode=greenfield, publish_details debe incluir owner y repo"
+    - rule: "si mode=brownfield, publish_details debe incluir pr_url y branch"
+
+# -----------------------------------------------------------------------------
+# HITL
+# -----------------------------------------------------------------------------
+hitl:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Budget
+# -----------------------------------------------------------------------------
+budget:
+  # Haiku, 2 iter max, una tool call. Ultra barato.
+  max_cost_usd: 0.25
+  timeout_minutes: 5
+
+# -----------------------------------------------------------------------------
+# System prompt
+# -----------------------------------------------------------------------------
+system_prompt: |
+  Eres el Publish Agent del ciclo ADLC. Corres DESPUES de validation y
+  tu unico trabajo es publicar el artefacto del coding phase a GitHub.
+
+  El project_state incluye:
+    - prompt_inicial, target_repo
+    - feature_intent, acceptance_criteria
+    - files_modified, unit_tests (del coding)
+    - deploy_status (del validation — si esta bloqueado no llegaste aca)
+
+  La tool `git_publish` acepta:
+    {
+      "mode": "greenfield" | "brownfield",
+      "slug": "<para greenfield>",
+      "target_repo": "<para brownfield, owner/repo o URL>",
+      "commit_message": "<obligatorio>",
+      "pr_title": "<brownfield>",
+      "pr_body": "<brownfield, markdown>",
+      "base_branch": "main",
+      "description": "<greenfield, opcional>"
+    }
+  Y devuelve: {ok, mode, repo_url|pr_url, branch, commit_sha, ...}.
+
+  Decision tree:
+    1. Si `target_repo` esta vacio, es null, o dice literalmente
+       "greenfield" → mode=greenfield.
+    2. Si `target_repo` es una URL de github (https://github.com/... o
+       owner/repo) → mode=brownfield.
+
+  Para greenfield:
+    - Generá un slug corto (≤ 40 chars) a partir del prompt_inicial.
+      Lowercase, alfanum + guion. La tool lo resanitiza igual asi que
+      no te preocupes por caracteres raros. Ejemplo: prompt_inicial
+      "Sistema de recomendacion de peliculas" → slug "recomendacion-peliculas".
+    - commit_message: "Initial ADLC commit — <feature_intent one-liner>".
+    - description: one-liner del feature.
+
+  Para brownfield:
+    - commit_message: "<feature_intent one-liner> (ADLC run <run_id_short>)".
+    - pr_title: igual al commit_message (primera linea).
+    - pr_body: markdown con secciones:
+        ## Feature
+        <feature_intent>
+        ## Acceptance criteria
+        <bullets de acceptance_criteria>
+        ## Files modified
+        <bullets de files_modified>
+        ## Tests
+        exit_code: <N>, passed: <N>
+      Mantenelo conciso, ≤ 400 caracteres.
+
+  LLAMA `git_publish` UNA SOLA VEZ. Si el resultado es `ok=true`,
+  devolves el state_patch final con:
+    {
+      "publish_status": "published",
+      "repo_url": "<solo greenfield>",
+      "pr_url": "<solo brownfield>",
+      "publish_details": {
+        "mode": "greenfield|brownfield",
+        "branch": "<branch>",
+        "commit_sha": "<sha>",
+        "owner": "<owner>",
+        "repo": "<repo>"
+      }
+    }
+
+  Si el resultado es `ok=false`, NO reintentes la misma operacion. Devolve:
+    {
+      "publish_status": "failed",
+      "publish_details": { "error": "<error del tool>" }
+    }
+  El humano decide si re-correr el publish manualmente.
+
+  Reglas:
+  - NO crees dos repos por run. Una sola tool call exitosa.
+  - El run_id NO va en el nombre del repo. Es buscable via:
+      * trailer `ADLC-Run-ID: <run_id>` en el commit (lo agrega la tool)
+      * topic `adlc-run-<run_id_short>` en el repo (lo setea la tool)
+    El slug debe ser limpio y semantico (ej. "machbank-balance-formatter").
+    Si ya existe en la cuenta, la tool agrega sufijo -2/-3 automaticamente.
+  - NO reintentes con el mismo slug si git_publish devolvio "already exists"
+    despues de los retries internos — significa que hay >10 colisiones,
+    cosa muy rara. Reporta publish_status=failed con la razon.
+
+# -----------------------------------------------------------------------------
+# Failure modes documentados
+# -----------------------------------------------------------------------------
+failure_modes:
+  - mode: "GITHUB_TOKEN sin scope repo"
+    handling: "git_publish devuelve 403/404 del API — publish_status=failed con el body del error"
+  - mode: "tar.gz del coding no existe"
+    handling: "git_publish devuelve error claro — publish_status=failed:no_artifact"
+  - mode: "brownfield sin write access al target_repo"
+    handling: "push falla — publish_status=failed con stderr del git"

@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+
+# Engine (Python)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Config con secretos (NUNCA commitear)
+config/adlc.config.yaml
+
+# Postgres data si alguien corre fuera de docker
+pgdata/
