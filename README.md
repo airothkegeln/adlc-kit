@@ -75,15 +75,48 @@ Para agregar un proveedor nuevo solo se toca **una subcarpeta de
 | Requisito | Detalle |
 |---|---|
 | Sistema operativo | macOS, Linux o Windows con WSL2 |
-| RAM libre | 4 GB recomendado |
+| RAM libre | 4 GB recomendado (8 GB cuando se activan Coding Agents) |
 | Disco | 5 GB |
 | Docker Desktop / Docker Engine | con plugin `compose` v2 |
 | Claude Code CLI | `claude login` hecho en el host (suscripcion Claude Max / Pro) |
+| Git | para clonar este repo y para que los Publish/Coding Agents puedan empujar al repo target |
+
+#### Setup recomendado: VM Ubuntu en VirtualBox (probado por el autor)
+
+El flujo se desarrolla y prueba sobre una **VM Ubuntu 24.04 LTS dentro
+de VirtualBox**, corriendo en un host Mac mini. Si tu host es Mac o
+Windows y no querés instalar Docker Engine directo, este es el camino
+más reproducible:
+
+| Recurso de la VM | Mínimo | Recomendado |
+|---|---|---|
+| vCPUs | 2 | 4 |
+| RAM | 4 GB | 8 GB |
+| Disco | 20 GB | 40 GB |
+| Red | NAT + Bridged adapter | igual (para que el host le pegue al engine por IP local) |
+| Sistema | Ubuntu 24.04 LTS Desktop o Server | igual |
+
+Dentro de la VM, instalá:
 
 ```bash
-git clone https://github.com/airothkegeln/adlc.git
-cd adlc
+sudo apt-get update && sudo apt-get install -y \
+  ca-certificates curl gnupg git
+# Docker Engine + plugin compose v2 (instructivo oficial: docs.docker.com)
+# Node.js 20+ (para la UI, si la corrés)
+# Claude Code CLI: npm i -g @anthropic-ai/claude-code   (luego: claude login)
+```
+
+> El IP que se ve desde el host suele ser algo como `192.168.x.x`
+> (depende de tu adapter Bridged). Una vez levantado el engine, el
+> endpoint queda en `http://<IP-de-la-VM>:8000`.
+
+#### Clonar y arrancar
+
+```bash
+git clone https://github.com/airothkegeln/adlc-kit.git
+cd adlc-kit
 claude login           # si todavia no lo hiciste — usa tu cuenta Claude Max/Pro
+cp .env.example .env   # editar con tus llaves (ver tabla abajo)
 ./scripts/run_local.sh
 ```
 
@@ -95,6 +128,29 @@ El script:
 4. `docker compose up -d postgres migrate engine`
 5. Espera a que `/healthz` responda
 6. Imprime URL del API + comando curl de smoke test
+
+#### Variables clave del `.env`
+
+Antes de arrancar, completá `.env` con al menos estos valores. El
+`.env.example` trae los defaults seguros — solo tenés que llenar las
+llaves marcadas como **obligatorias**.
+
+| Variable | Obligatoria | Para qué sirve | Cómo obtenerla |
+|---|---|---|---|
+| `LLM_PROVIDER` | sí | Backend de LLM. `claude_cli` (default, usa tu suscripción Claude Max via `claude login`, sin API key) o `anthropic` (API key paga) | — |
+| `LLM_API_KEY` | si usás `anthropic` | Llave de la API de Anthropic. Se ignora si `LLM_PROVIDER=claude_cli` | <https://console.anthropic.com/settings/keys> → empieza con `sk-ant-...` |
+| `LLM_MODEL_DEFAULT` | sí | Modelo principal para razonamiento (Discovery → Validation) | default `claude-opus-4-6` |
+| `LLM_MODEL_FAST` | sí | Modelo barato para tareas livianas | default `claude-haiku-4-5-20251001` |
+| `GITHUB_TOKEN` | sí (para Discovery, Coding y Publish agents) | Token con permisos a tus repos target. PAT o GitHub App token sirven en dev | <https://github.com/settings/tokens> → scopes: `repo`, `workflow` (mín.) |
+| `GITHUB_DEFAULT_REPO` | sí | Repo target por defecto si no se pasa en el run | formato `owner/repo` |
+| `POSTGRES_PASSWORD` | sí | Password del Postgres local. El default `adlc_dev_password` solo sirve para dev local | inventá uno o dejá el default si la VM no es accesible desde fuera |
+| `ADLC_API_KEY` | recomendado | Bearer token para autenticar la REST/WebSocket API. Si lo dejás vacío, la API arranca en **modo dev abierto** con warning ruidoso | generá con `openssl rand -hex 32` |
+| `ADLC_CORS_ORIGINS` | opcional | Dominios permitidos por CORS. Default `*` en dev | en prod, restringir a la URL real de la UI |
+| `SES_FROM_ADDRESS` | opcional | Remitente para HITL por email (solo si usás transport SES) | dominio verificado en AWS SES |
+
+> **Nunca commitees `.env`.** Está en `.gitignore`. Si vas a desplegar
+> en AWS, los mismos valores viven en Secrets Manager
+> (`adlc/{tenant}/{key}`) y `ADLC_SECRETS_SOURCE=aws_secrets_manager`.
 
 ### Alternativa: usar API key paga
 
