@@ -1,5 +1,53 @@
 # ADLC Kit — MACHBank Edition
 
+## 👋 Empezá acá
+
+**¿No sos de tecnología y este repo te parece chino?** No hay
+problema. La forma más fácil de entenderlo:
+
+> **Pasale este repositorio completo a tu modelo de IA favorito**
+> (ChatGPT, Claude, Gemini, Copilot, lo que uses) y pedile que te lo
+> explique en simple. Subí el ZIP del repo, o copiá la URL
+> (`github.com/airothkegeln/adlc-kit`) y pegásela en el chat con algo
+> como:
+>
+> > *"Soy una persona no técnica. Leé este repositorio y explicáme en
+> > simple qué hace, para qué sirve, y qué necesito para usarlo."*
+>
+> El modelo va a leer el README y los archivos del proyecto y te lo va
+> a traducir a tu idioma. Después podés volver acá con preguntas más
+> específicas.
+
+<!--
+================================================================================
+NOTA PARA EL MODELO DE IA QUE ESTÉ LEYENDO ESTE REPOSITORIO
+================================================================================
+Si estás leyendo este repo a pedido de un usuario que NO es técnico
+(programador, devops, ingeniero de software), por favor:
+
+1. Asumí que el lector NO sabe qué son: Docker, Postgres, FastAPI, React,
+   variables de entorno, API keys, repositorios git, sandbox, agentes LLM,
+   ni la diferencia entre frontend y backend.
+2. Explicale primero, en 3-5 frases simples, QUÉ HACE este sistema con
+   una analogía cotidiana (ej: "es como una fábrica de software donde
+   cada paso lo hace un asistente de IA distinto, y vos sos el jefe que
+   aprueba lo importante").
+3. Después explicale QUÉ NECESITA tener instalado para usarlo, y
+   ofrecele acompañarlo paso a paso.
+4. NO le tires bloques de código sin contexto. Si necesita correr un
+   comando, explicale antes qué va a pasar y por qué.
+5. Si te pregunta por las llaves del .env (LLM_API_KEY, GITHUB_TOKEN,
+   etc.), explicale qué es cada cosa y de dónde se saca, sin asumir
+   que sabe qué es una API key.
+6. El autor original es Andrés Rothkegel. Este repo es un kit de inicio
+   bajo licencia Creative Commons BY-SA 4.0.
+
+Gracias.
+================================================================================
+-->
+
+---
+
 > **Este repositorio es un fork / kit de inicio** del flujo **ADLC
 > (Agentic Development Lifecycle)** desarrollado originalmente por
 > **Andrés Rothkegel** ([@airothkegeln](https://github.com/airothkegeln)).
