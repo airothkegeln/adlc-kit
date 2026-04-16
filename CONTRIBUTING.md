@@ -1,18 +1,25 @@
-# Contributing to ADLC Platform
+# Contributing to ADLC Kit (MACHBank edition)
 
-Gracias por tu interés en ADLC Platform. Este documento describe cómo
+> Este repositorio es un **kit de inicio** derivado del flujo ADLC
+> (Agentic Development Lifecycle) desarrollado originalmente por
+> **Andrés Rothkegel** ([@airothkegeln](https://github.com/airothkegeln)).
+> Ver [NOTICE.md](./NOTICE.md) y [LICENSE](./LICENSE) para detalles de
+> atribución.
+
+Gracias por tu interés en ADLC. Este documento describe cómo
 contribuir y cómo está organizado el proyecto para que terceros puedan
 extenderlo sin tocar el núcleo.
 
 ## Modelo de contribución
 
-- **Repositorio canónico:** `github.com/airothkegeln/adlc`
+- **Repositorio canónico del flujo ADLC:** `github.com/airothkegeln/adlc`
+- **Este kit:** `github.com/airothkegeln/adlc-kit`
 - **Pull requests** al repo canónico son revisados y mergeados
   **exclusivamente por el dueño del repo**. No hay merge automático.
 - **Forks son bienvenidos.** Si forkeas este proyecto, debes:
   1. Mantener la licencia CC BY-SA 4.0.
   2. Indicar explícitamente en tu README que es una modificación de
-     ADLC Platform original (`github.com/airothkegeln/adlc`).
+     ADLC original de Andrés Rothkegel (`github.com/airothkegeln/adlc`).
   3. Compartir tus modificaciones bajo la misma licencia.
 
 ## Filosofía de diseño: adapters aislados

@@ -1,4 +1,15 @@
-# ADLC Platform
+# ADLC Kit — MACHBank Edition
+
+> **Este repositorio es un fork / kit de inicio** del flujo **ADLC
+> (Agentic Development Lifecycle)** desarrollado originalmente por
+> **Andrés Rothkegel** ([@airothkegeln](https://github.com/airothkegeln)).
+> Se distribuye como **kit de inicio** para equipos que quieran arrancar
+> su propio ciclo de desarrollo agéntico, bajo licencia
+> [Creative Commons Attribution-ShareAlike 4.0](./LICENSE).
+>
+> - **Upstream / repo canónico del flujo ADLC:** `github.com/airothkegeln/adlc`
+> - **Este kit:** `github.com/airothkegeln/adlc-kit` (MACHBank edition)
+> - Ver [NOTICE.md](./NOTICE.md) para atribución completa.
 
 **Agentic Development Lifecycle** — plataforma forkable que materializa un
 ciclo de desarrollo de software completamente agentizado: desde la toma de
@@ -7,11 +18,11 @@ requerimientos hasta el despliegue en producción.
 > Este es un sistema funcional, no una demo. Los agentes están diseñados
 > para ejecutar el flujo completo en producción contra un repo target real.
 
-- **Repo canónico:** `github.com/airothkegeln/adlc`
 - **Licencia:** [Creative Commons BY-SA 4.0](./LICENSE)
 - **PRs upstream** son revisados exclusivamente por el dueño del repo.
   Los forks son bienvenidos siempre que atribuyan el trabajo original
-  (ver [LICENSE](./LICENSE) y [CONTRIBUTING.md](./CONTRIBUTING.md)).
+  (ver [LICENSE](./LICENSE), [NOTICE.md](./NOTICE.md) y
+  [CONTRIBUTING.md](./CONTRIBUTING.md)).
 
 ---
 
