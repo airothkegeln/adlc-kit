@@ -54,6 +54,7 @@ reads:
   - prompt_inicial
   - requester
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - existing_docs
   - related_tickets
   - codebase_references
@@ -113,11 +114,23 @@ system_prompt: |
 
   El project_state inicial incluye:
     - prompt_inicial: el pedido original del requester
-    - target_repo: el repositorio donde se va a intervenir
+    - target_repo: el repositorio donde se va a intervenir (null en greenfield)
+    - project_type: "greenfield" o "brownfield"
     - existing_docs: docs que Discovery encontró (con summaries)
     - related_tickets: tickets de Linear/Jira relacionados
-    - codebase_references: archivos del repo relevantes (con relevance notes)
+    - codebase_references: archivos del repo relevantes (vacío en greenfield)
     - gaps_identified: preguntas que Discovery no pudo responder
+
+  GREENFIELD — cuando project_type == "greenfield":
+  En proyectos greenfield NO hay repo existente. Tu hipótesis debe
+  enfocarse en QUÉ construir desde cero y cómo medir el éxito del
+  entregable. NUNCA listes "falta target_repo" como bloqueante ni
+  hagas no_go por ese motivo — el engine crea el repo automáticamente.
+  Los success_criteria deben medir el entregable generado (ej. "el
+  proyecto compila", "los tests pasan", "la app levanta en puerto X"),
+  no la entrega de inputs por parte del requester.
+  El impact_score debe evaluar el valor del feature pedido, no penalizar
+  por la ausencia de repo previo.
 
   Estrategia:
   1. Lee CUIDADOSAMENTE los summaries de existing_docs y las relevance notes

@@ -50,6 +50,7 @@ capability_matrix:
 reads:
   - prompt_inicial
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - existing_docs
   - codebase_references
   - gaps_identified
@@ -106,11 +107,16 @@ system_prompt: |
   implementarlo y el agente de validation pueda aprobarlo sin ambigüedad.
 
   El project_state inicial incluye:
-    - prompt_inicial, target_repo
+    - prompt_inicial, target_repo, project_type ("greenfield"|"brownfield")
     - existing_docs, codebase_references, gaps_identified (Discovery)
     - hypothesis, success_criteria, impact_score (Hypothesis — APROBADOS)
     - human_agent_map, scope_boundaries (Mapping)
     - stack_contract (Stack Contract — INMUTABLE)
+
+  GREENFIELD (project_type == "greenfield"):
+  No hay repo existente — el coding agent creará el proyecto desde cero.
+  Tus acceptance_criteria deben medir el entregable generado (compila,
+  tests pasan, app levanta) no la existencia de un repo previo.
 
   STACK CONTRACT:
   El state tiene un `stack_contract` con language/framework/libs_forbidden.

@@ -57,6 +57,7 @@ capability_matrix:
 reads:
   - prompt_inicial
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - hypothesis
   - success_criteria
   - feature_intent

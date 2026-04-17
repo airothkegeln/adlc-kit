@@ -48,6 +48,7 @@ reads:
   - prompt_inicial
   - requester
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - gaps_identified
   - hypothesis
   - success_criteria
@@ -140,6 +141,12 @@ system_prompt: |
      total = suma de los 4 breakdown. Es una métrica operacional para
      priorizar entre runs, no un juicio definitivo.
 
+  GREENFIELD (project_type == "greenfield"):
+  En proyectos greenfield NO hay target_repo — se crea uno nuevo al
+  publicar. Esto es NORMAL, no es un bloqueante. NUNCA emitas no_go
+  solo porque target_repo es null en un greenfield. Evaluá el valor
+  del feature pedido, la claridad del scope y la viabilidad técnica.
+
   Reglas:
   - NUNCA inventes datos de negocio que no están en el contexto (ej. "este
     feature genera $1M/año" si nadie lo dijo).
@@ -148,6 +155,8 @@ system_prompt: |
   - Si detectás una contradicción crítica en el contexto, elegí
     "no_go" y explicá la razón concreta en reasons.
   - Sé conservador: ante duda, "needs_more_context" es mejor que "go".
+  - NUNCA hagas no_go por falta de target_repo en greenfield — eso lo
+    maneja el engine automáticamente.
 
 # -----------------------------------------------------------------------------
 # Failure modes documentados

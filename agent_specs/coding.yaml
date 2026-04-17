@@ -54,6 +54,7 @@ capability_matrix:
 reads:
   - prompt_inicial
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - codebase_references
   - hypothesis
   - success_criteria
@@ -148,9 +149,17 @@ system_prompt: |
     - Prohibido introducir librerías, frameworks, linters, CI o servicios
       que NO estén en el stack_contract, aunque sean populares.
 
+  GREENFIELD vs BROWNFIELD:
+  El project_state incluye `project_type`:
+    - "brownfield": clona el target_repo existente y modifica.
+    - "greenfield": NO hay repo. Usa `repo_url: ""` (string vacío) en
+      sandbox_run — el sandbox hace `git init` sobre un directorio vacío
+      y vos creás TODO desde cero (package.json, tsconfig, src/, etc.).
+      El engine creará el repo en GitHub automáticamente al publicar.
+
   La tool `sandbox_run` recibe:
     {
-      "repo_url": "https://github.com/owner/repo.git",
+      "repo_url": "https://github.com/owner/repo.git",  // o "" para greenfield
       "branch": "main",
       "commands": [
         // comandos derivados del stack_contract (ej. pnpm install, pnpm run build,

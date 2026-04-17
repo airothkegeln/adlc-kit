@@ -272,10 +272,15 @@ def _build_initial_state(run: Run) -> dict[str, Any]:
     for repo_name, cats in repos_by_cat.items():
         for cat in (cats or []):
             reference_repos.setdefault(cat, []).append(repo_name)
+    # Detectar greenfield vs brownfield: si no hay target_repo, es greenfield
+    # (el requester quiere crear algo nuevo desde cero).
+    project_type = "brownfield" if run.target_repo else "greenfield"
+
     return {
         "prompt_inicial": run.prompt,
         "requester": run.requester,
         "target_repo": run.target_repo,
+        "project_type": project_type,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "metadata": md,
         "reference_repos": reference_repos,

@@ -6059,20 +6059,25 @@ function NuevoRunView({ contextData, ghRepos, prompt, setPrompt, requester, setR
         )}
         {missingDevRepo && (
           <div style={{ padding: "8px 12px", background: "#FFF3CD", border: "1px solid #FFEAA7", borderRadius: 6, fontSize: 11, color: "#856404", marginBottom: 8 }}>
-            Seleccionaste repos pero ninguno tiene categoria <b>Desarrollo Back</b> o <b>Desarrollo Front</b>. ADLC necesita al menos un repo de desarrollo como target — los de Arquitectura, Design System, UX, etc. son solo referencias.
+            Seleccionaste repos pero ninguno tiene categoria <b>Desarrollo Back</b> o <b>Desarrollo Front</b>. Los repos de Arquitectura, Design System, UX son solo referencias. El ciclo correrá en modo <b>greenfield</b> (crea un repo nuevo).
+          </div>
+        )}
+        {selectedRepos.length === 0 && prompt.trim() && (
+          <div style={{ padding: "8px 12px", background: "#D4EDDA", border: "1px solid #C3E6CB", borderRadius: 6, fontSize: 11, color: "#155724", marginBottom: 8 }}>
+            Sin repo de desarrollo seleccionado → modo <b>greenfield</b>. ADLC creará un repositorio nuevo con los fuentes generados.
           </div>
         )}
         <button
           onClick={onSubmit}
-          disabled={submitting || !prompt.trim() || !requester.trim() || missingDevRepo}
+          disabled={submitting || !prompt.trim() || !requester.trim()}
           style={{
             padding: "10px 20px", background: C.teal.main, color: "#fff", border: "none",
             borderRadius: 6, fontSize: 13, fontFamily: "inherit", fontWeight: 700,
-            cursor: submitting || !prompt.trim() || !requester.trim() || missingDevRepo ? "not-allowed" : "pointer",
-            opacity: submitting || !prompt.trim() || !requester.trim() || missingDevRepo ? 0.5 : 1,
+            cursor: submitting || !prompt.trim() || !requester.trim() ? "not-allowed" : "pointer",
+            opacity: submitting || !prompt.trim() || !requester.trim() ? 0.5 : 1,
           }}
         >
-          {submitting ? "Creando run..." : "Lanzar ciclo ADLC"}
+          {submitting ? "Creando run..." : hasDevRepo ? "Lanzar ciclo ADLC" : "Lanzar ciclo ADLC (greenfield)"}
         </button>
       </div>
 
@@ -6398,12 +6403,10 @@ function OperationsPage({ t, dark }) {
     try {
       // target_repo = primer repo con categoria desarrollo_*. Los repos con
       // categoria arquitectura / design_system / ux son referencias, no
-      // target. Si no hay ningun desarrollo_*, se bloquea el submit.
+      // target. Si no hay ningun desarrollo_*, es greenfield (target_repo=null)
+      // y el engine creará un repo nuevo al publicar.
       const selectedRepoNames = Object.keys(repoSelections).filter(k => repoSelections[k].length > 0);
       const devRepoNames = selectedRepoNames.filter(n => (repoSelections[n] || []).some(c => c.startsWith("desarrollo_")));
-      if (selectedRepoNames.length > 0 && devRepoNames.length === 0) {
-        throw new Error("Necesitás al menos un repo con categoría Desarrollo Back o Desarrollo Front como target. Los repos de Arquitectura, Design System, UX, etc. son solo referencias.");
-      }
       const targetRepo = devRepoNames[0] || null;
       const r = await apiFetch("/runs", {
         method: "POST",

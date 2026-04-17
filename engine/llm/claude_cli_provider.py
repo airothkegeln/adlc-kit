@@ -39,6 +39,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Iterator
 
 from .base import (
@@ -144,26 +145,49 @@ class ClaudeCLIProvider(LLMProvider):
             "--strict-mcp-config",
             "--mcp-config", '{"mcpServers":{}}',
         ]
-        if sys_prompt:
-            cmd.extend(["--append-system-prompt", sys_prompt])
-        cmd.extend(self._extra_args)
-        cmd.append(prompt)
 
-        env = _build_env(self._home)
-
+        # System prompt y user prompt pueden ser enormes (>2MB en iter 8+
+        # del coding agent con heredocs acumulados). Pasarlos como args CLI
+        # rompe el ARG_MAX del kernel ([Errno 7] Argument list too long).
+        # Solución: escribir a archivos temporales y pasar las paths.
+        # --append-system-prompt acepta @file syntax, y el prompt va via stdin.
+        tmp_files: list[str] = []
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise TimeoutError(
-                f"claude CLI timeout despues de {self._timeout}s. "
-                f"Cmd: {self._binary} -p ..."
-            ) from e
+            if sys_prompt:
+                sp_fd, sp_path = tempfile.mkstemp(suffix=".txt", prefix="adlc_sys_")
+                tmp_files.append(sp_path)
+                with os.fdopen(sp_fd, "w") as f:
+                    f.write(sys_prompt)
+                cmd.extend(["--append-system-prompt", f"@{sp_path}"])
+
+            cmd.extend(self._extra_args)
+
+            # Prompt va via stdin con "-" como argumento (lee de stdin).
+            # Claude CLI: `claude -p -` lee el prompt de stdin.
+            cmd.append("-")
+
+            env = _build_env(self._home)
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=self._timeout,
+                    env=env,
+                )
+            except subprocess.TimeoutExpired as e:
+                raise TimeoutError(
+                    f"claude CLI timeout despues de {self._timeout}s. "
+                    f"Cmd: {self._binary} -p ..."
+                ) from e
+        finally:
+            for p in tmp_files:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
         # Intentar parsear JSON incluso con exit != 0 — error_max_turns
         # devuelve exit 1 pero con JSON valido que puede contener texto util.

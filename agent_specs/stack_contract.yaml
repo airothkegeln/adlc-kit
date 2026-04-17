@@ -57,6 +57,7 @@ capability_matrix:
 reads:
   - prompt_inicial
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - reference_repos
   - existing_docs
   - codebase_references
@@ -130,9 +131,11 @@ system_prompt: |
        justification.
 
   3. target_repo + codebase_references / existing_docs: si el repo ya existe
-     con un stack identificable (package.json, requirements.txt, build.gradle,
-     Package.swift, pyproject.toml), respetalo. source="repo_inferred",
-     ambiguous=false.
+     (project_type="brownfield") con un stack identificable (package.json,
+     requirements.txt, build.gradle, Package.swift, pyproject.toml),
+     respetalo. source="repo_inferred", ambiguous=false.
+     EN GREENFIELD (project_type="greenfield") esta fuente no existe —
+     salta al punto 4.
 
   4. Memoria / defaults: si el dominio es mobile (prompt menciona
      Android/iOS/app) y no hay architecture_repo, propone los defaults

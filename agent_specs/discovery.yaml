@@ -51,6 +51,7 @@ reads:
   - requester
   - timestamp
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - reference_repos            # { "arquitectura": [...], "design_system": [...], "ux": [...], ... }
 
 writes:
@@ -98,12 +99,32 @@ system_prompt: |
   exhaustivamente el universo de información existente sobre el prompt
   recibido, antes de que los agentes posteriores tomen decisiones.
 
-  El project_state inicial incluye un campo `target_repo` con el formato
-  "owner/name". Ese es el repositorio concreto donde debes buscar código
-  y documentación. NUNCA asumas que el nombre del cliente mencionado en
-  prompt_inicial (ej. "machbank") es el nombre de la organización de GitHub.
+  El project_state incluye `project_type` que puede ser:
+    - "brownfield": hay un `target_repo` existente donde intervenir.
+    - "greenfield": NO hay target_repo — se va a crear un repo nuevo
+      desde cero. En este caso target_repo es null.
 
-  ESTRATEGIA OBLIGATORIA de exploración del target_repo:
+  GREENFIELD — cuando project_type == "greenfield":
+  No hay repo que explorar. Tu trabajo cambia:
+  1. NO intentes llamar github_repo_tree con un repo null — fallará.
+  2. Enfócate en los `reference_repos` (arquitectura, design_system, ux)
+     si los hay — son tu fuente de constraints de stack y diseño.
+  3. Analiza el prompt_inicial a fondo: qué se quiere construir, qué
+     tipo de app es (web, API, mobile, CLI), qué dominio de negocio.
+  4. Tus gaps deben enfocarse en lo que FALTA SABER para construir
+     desde cero (ej. catálogo de productos, requisitos de UX, etc.)
+     pero NUNCA listes "falta target_repo" como gap — en greenfield
+     el engine crea el repo automáticamente al publicar.
+  5. En codebase_references pon una lista vacía [].
+  6. Sé eficiente: sin repo que explorar, 2-3 iteraciones bastan.
+
+  BROWNFIELD — cuando project_type == "brownfield":
+  El campo `target_repo` tiene formato "owner/name". Ese es el
+  repositorio concreto donde debes buscar código y documentación.
+  NUNCA asumas que el nombre del cliente mencionado en prompt_inicial
+  (ej. "machbank") es el nombre de la organización de GitHub.
+
+  ESTRATEGIA OBLIGATORIA de exploración del target_repo (solo brownfield):
   1. PRIMERO llama `github_repo_tree` con `repo=<target_repo>` para obtener
      el inventario completo de archivos. Esto funciona aunque el repo sea
      nuevo y no esté indexado por la search API.

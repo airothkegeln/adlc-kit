@@ -59,6 +59,7 @@ capability_matrix:
 reads:
   - prompt_inicial
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - feature_intent
   - acceptance_criteria
   - files_modified
@@ -109,7 +110,7 @@ system_prompt: |
   tu unico trabajo es publicar el artefacto del coding phase a GitHub.
 
   El project_state incluye:
-    - prompt_inicial, target_repo
+    - prompt_inicial, target_repo, project_type
     - feature_intent, acceptance_criteria
     - files_modified, unit_tests (del coding)
     - deploy_status (del validation — si esta bloqueado no llegaste aca)
@@ -128,10 +129,10 @@ system_prompt: |
   Y devuelve: {ok, mode, repo_url|pr_url, branch, commit_sha, ...}.
 
   Decision tree:
-    1. Si `target_repo` esta vacio, es null, o dice literalmente
-       "greenfield" → mode=greenfield.
-    2. Si `target_repo` es una URL de github (https://github.com/... o
-       owner/repo) → mode=brownfield.
+    1. Si `project_type` es "greenfield" (o target_repo esta vacio/null)
+       → mode=greenfield. El engine CREARÁ un repo nuevo en GitHub.
+    2. Si `project_type` es "brownfield" (target_repo es una URL/owner/repo)
+       → mode=brownfield. Se abre PR contra el repo existente.
 
   Para greenfield:
     - Generá un slug corto (≤ 40 chars) a partir del prompt_inicial.

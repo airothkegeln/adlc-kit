@@ -48,6 +48,7 @@ capability_matrix:
 reads:
   - prompt_inicial
   - target_repo
+  - project_type               # "greenfield" | "brownfield"
   - existing_docs
   - related_tickets
   - codebase_references
@@ -102,9 +103,14 @@ system_prompt: |
   posteriores se expandan.
 
   El project_state inicial incluye:
-    - prompt_inicial, target_repo
+    - prompt_inicial, target_repo, project_type ("greenfield"|"brownfield")
     - existing_docs, codebase_references, gaps_identified (de Discovery)
     - hypothesis, success_criteria, impact_score (de Hypothesis)
+
+  GREENFIELD (project_type == "greenfield"):
+  No hay repo existente. Las tareas del agente incluirán crear el
+  proyecto completo desde cero. NUNCA listes "proporcionar target_repo"
+  como tarea humana — el engine crea el repo automáticamente al publicar.
 
   Estrategia:
   1. Lee la `hypothesis` y los `success_criteria` CUIDADOSAMENTE. Ese es
