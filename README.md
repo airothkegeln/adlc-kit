@@ -144,19 +144,120 @@ más reproducible:
 | Red | NAT + Bridged adapter | igual (para que el host le pegue al engine por IP local) |
 | Sistema | Ubuntu 24.04 LTS Desktop o Server | igual |
 
-Dentro de la VM, instalá:
+#### Paso a paso: instalar todo dentro de la VM Ubuntu 24.04
+
+Estos comandos los corrés **dentro de la VM**, desde una terminal. Si
+seguís el orden, al final vas a tener: git, Docker + compose v2,
+Node.js 20, Claude Code CLI y el repo clonado listo para arrancar.
+
+**1. Actualizar el sistema y herramientas base**
 
 ```bash
-sudo apt-get update && sudo apt-get install -y \
-  ca-certificates curl gnupg git
-# Docker Engine + plugin compose v2 (instructivo oficial: docs.docker.com)
-# Node.js 20+ (para la UI, si la corrés)
-# Claude Code CLI: npm i -g @anthropic-ai/claude-code   (luego: claude login)
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get install -y \
+  ca-certificates curl gnupg lsb-release \
+  git build-essential openssl unzip
 ```
 
-> El IP que se ve desde el host suele ser algo como `192.168.x.x`
-> (depende de tu adapter Bridged). Una vez levantado el engine, el
-> endpoint queda en `http://<IP-de-la-VM>:8000`.
+**2. Verificar git y configurar tu identidad**
+
+```bash
+git --version                                    # debe imprimir git version 2.x.x
+git config --global user.name  "Tu Nombre"
+git config --global user.email "tu@email.com"
+```
+
+> Si vas a pushear a repos privados, generá una SSH key con
+> `ssh-keygen -t ed25519 -C "tu@email.com"` y agregá la pública
+> (`cat ~/.ssh/id_ed25519.pub`) en
+> <https://github.com/settings/keys>. Para HTTPS con PAT, usá el
+> `GITHUB_TOKEN` del `.env`.
+
+**3. Instalar Docker Engine + plugin compose v2** (repo oficial de Docker)
+
+```bash
+# a) Agregar la GPG key oficial de Docker
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# b) Agregar el repo de Docker para tu versión de Ubuntu
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# c) Instalar Docker + compose v2
+sudo apt-get update
+sudo apt-get install -y \
+  docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+
+# d) Correr docker sin sudo (agregar tu usuario al grupo docker)
+sudo usermod -aG docker $USER
+newgrp docker                                    # aplica el grupo en esta sesión
+
+# e) Verificar
+docker --version                                  # Docker version 27.x
+docker compose version                            # Docker Compose version v2.x
+docker run --rm hello-world                       # debe bajar e imprimir "Hello from Docker!"
+```
+
+> **Importante:** usá `docker compose` (dos palabras, v2 plugin). El
+> viejo `docker-compose` (con guión) no es compatible con este repo.
+
+**4. Instalar Node.js 20 LTS** (para la UI frontend)
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node --version                                    # v20.x.x
+npm --version                                     # 10.x.x
+```
+
+**5. Instalar Claude Code CLI y loguearte con tu cuenta Claude Max/Pro**
+
+```bash
+sudo npm install -g @anthropic-ai/claude-code
+claude --version                                  # debe imprimir una versión
+claude login                                      # abre el flujo OAuth en el browser
+```
+
+> El login OAuth abre una URL. Copiala al browser del host si la VM
+> es headless. Los tokens viven en `~/.claude/` y expiran cada ~24 h
+> — si el engine empieza a fallar con errores de auth, corré
+> `claude login` de nuevo.
+
+**6. Clonar este repo**
+
+```bash
+cd ~
+git clone https://github.com/airothkegeln/adlc-kit.git
+cd adlc-kit
+```
+
+**7. Averiguar la IP de la VM** (la vas a usar desde el host)
+
+```bash
+ip -4 addr show | grep inet                       # buscá la interfaz bridged
+```
+
+Suele ser algo tipo `192.168.x.x`. El engine va a quedar escuchando
+en `http://<IP-de-la-VM>:8000` y la UI en `http://<IP-de-la-VM>:5173`.
+
+**8. Checkpoint de verificación** — antes de seguir al `.env`
+
+```bash
+git --version && \
+docker --version && \
+docker compose version && \
+node --version && \
+claude --version
+```
+
+Si los cinco comandos imprimen versión sin error, tu VM está lista.
 
 #### Clonar y arrancar
 
