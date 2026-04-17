@@ -274,9 +274,15 @@ El script:
 2. Verifica que tengas creds de Claude CLI (`~/.claude/`) **o** una
    `ANTHROPIC_API_KEY` exportada como alternativa
 3. Crea `.env` y `config/adlc.config.yaml` desde los examples si no existen
-4. `docker compose up -d postgres migrate engine`
+4. `docker compose up -d --build` — levanta **todo** el stack:
+   `postgres + migrate + engine + sandbox + ui`
 5. Espera a que `/healthz` responda
-6. Imprime URL del API + comando curl de smoke test
+6. Imprime URL del API (`:8000`) + URL de la UI (`:5173`) + smoke test
+
+> **No necesitás correr `docker compose up -d ui` por separado.** El
+> script ya levanta la consola web en el mismo paso. La primera vez
+> tarda ~30-60 s mientras Vite hace `npm ci`; seguí el progreso con
+> `docker compose logs -f ui`.
 
 #### Variables clave del `.env`
 
@@ -348,11 +354,12 @@ curl -X POST http://localhost:8000/runs \
 # → {"run_id":"run_abc123...","status":"pending"}
 ```
 
-**Levantar la UI (opcional):**
+**La UI ya está arriba en `http://localhost:5173`** (la levantó
+`run_local.sh` junto con el engine). Si por alguna razón la apagaste,
+la volvés a levantar con:
 
 ```bash
 docker compose up -d ui
-# → http://localhost:5173
 ```
 
 La UI muestra la lista de runs, el reporte estructurado por fase, y el

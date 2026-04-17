@@ -210,8 +210,14 @@ fi
 # `--build` fuerza rebuild de las imagenes si hay cambios en el Dockerfile o
 # en el codigo. Sin esto, tras un `git pull` el usuario queda con la imagen
 # vieja y ve errores crípticos (columnas faltantes, comportamiento stale).
-echo "==> docker compose up -d --build postgres migrate engine"
-docker compose up -d --build postgres migrate engine
+#
+# Sin argumentos explicitos levantamos TODO el stack (postgres, migrate,
+# engine, sandbox, ui). Antes se levantaba solo postgres+migrate+engine y
+# el usuario tenia que acordarse de `docker compose up -d ui` para ver la
+# consola web. Con esto, un solo comando deja la plataforma accesible en
+# :8000 (API) y :5173 (UI).
+echo "==> docker compose up -d --build  (postgres + migrate + engine + sandbox + ui)"
+docker compose up -d --build
 
 # --- verificacion de migraciones ---
 # Las migraciones son idempotentes. Si el container migrate salio OK pero
@@ -256,13 +262,33 @@ if ! $HEALTHY; then
     exit 1
 fi
 
+# IP del host (para accesos desde la maquina fisica si estamos en una VM
+# con bridged adapter). En macOS `ip` no existe — fallback a ifconfig.
+HOST_IP=$(ip -4 addr show 2>/dev/null \
+    | awk '/inet /{print $2}' \
+    | cut -d/ -f1 \
+    | grep -vE '^(127\.|172\.17\.|169\.254\.)' \
+    | head -1)
+if [[ -z "${HOST_IP:-}" ]]; then
+    HOST_IP=$(ifconfig 2>/dev/null \
+        | awk '/inet /{print $2}' \
+        | grep -vE '^(127\.|169\.254\.)' \
+        | head -1)
+fi
+HOST_IP="${HOST_IP:-localhost}"
+
 cat <<EOF
 
 =================================================================
- ADLC engine arriba localmente
+ ADLC platform arriba localmente
 =================================================================
- API         : http://localhost:${ENGINE_PORT}
+ API         : http://localhost:${ENGINE_PORT}    (tambien http://${HOST_IP}:${ENGINE_PORT})
+ UI (web)    : http://localhost:5173              (tambien http://${HOST_IP}:5173)
  Healthcheck : curl http://localhost:${ENGINE_PORT}/healthz
+
+ La UI tarda ~30-60s la primera vez mientras Vite hace npm ci.
+ Seguir el progreso:
+   docker compose logs -f ui
 
  Smoke test (lanza un run con stub_executor):
    curl -X POST http://localhost:${ENGINE_PORT}/runs \\
