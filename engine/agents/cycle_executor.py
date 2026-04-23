@@ -170,6 +170,10 @@ async def _execute_phase_with_gate(
             accumulated.pop(retry_key, None)
             return
 
+        # Inyectamos run_id en el state para que gates que necesiten
+        # acceder a artefactos persistidos (ej. workspace.tar.gz del coding
+        # para auto-heal de README) puedan resolver el path correcto.
+        accumulated["_run_id"] = run.id
         result = gate(accumulated)
         if result.passed:
             run_log(

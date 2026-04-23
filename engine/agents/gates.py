@@ -26,6 +26,10 @@ Loop-back:
 
 from __future__ import annotations
 
+import io
+import os
+import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -257,10 +261,195 @@ def gate_post_architecture(state: dict[str, Any]) -> GateResult:
     return GateResult.ok()
 
 
+def _runs_dir() -> str:
+    return os.environ.get("ADLC_RUNS_DIR", "/data/runs")
+
+
+def _coding_workspace_tar(state: dict[str, Any]) -> str | None:
+    """Path al snapshot del workspace de coding. None si falta el run_id."""
+    run_id = state.get("_run_id") or state.get("run_id")
+    if not run_id:
+        return None
+    return os.path.join(_runs_dir(), str(run_id), "coding", "workspace.tar.gz")
+
+
+def _tar_has_readme(tar_path: str) -> bool:
+    try:
+        with tarfile.open(tar_path, "r:gz") as t:
+            for member in t.getmembers():
+                name = member.name.lower()
+                base = os.path.basename(name)
+                if base in ("readme.md", "readme.rst", "readme.txt", "readme"):
+                    return True
+    except (tarfile.TarError, OSError):
+        pass
+    return False
+
+
+def _render_readme_from_state(state: dict[str, Any]) -> str:
+    """Sintetiza un README.md desde el state cuando el coding agent no lo creo.
+    Usa stack_contract, manual_validation_tasks, y prompt_inicial como fuentes."""
+    contract = state.get("stack_contract") or {}
+    project_id = contract.get("project_id") or "proyecto"
+    stack = contract.get("tech_stack") or {}
+    prompt = state.get("prompt_inicial") or state.get("feature_intent", {}).get("summary") or ""
+    mv_tasks = state.get("manual_validation_tasks") or []
+    files = state.get("files_modified") or []
+    tests = state.get("unit_tests") or {}
+
+    lines: list[str] = []
+    lines.append(f"# {project_id}")
+    lines.append("")
+    if prompt:
+        lines.append(prompt.strip().split("\n")[0][:500])
+        lines.append("")
+
+    lines.append("## Requisitos")
+    lines.append("")
+    if isinstance(stack, dict) and stack:
+        for comp, details in stack.items():
+            if isinstance(details, dict):
+                bits = [f"**{comp}**:"]
+                for k, v in details.items():
+                    bits.append(f"{k}={v}")
+                lines.append("- " + " ".join(bits))
+            else:
+                lines.append(f"- **{comp}**: {details}")
+    else:
+        lines.append("- Revisa los manifests (`package.json`, `Package.swift`, `requirements.txt`, etc.) para versiones exactas.")
+    lines.append("")
+
+    lines.append("## Instalacion")
+    lines.append("")
+    lines.append("```bash")
+    lines.append("# ajusta segun el stack del proyecto")
+    lines.append("git clone <repo-url> && cd <repo-dir>")
+    if any(f.endswith("package.json") for f in files):
+        lines.append("pnpm install  # o npm install / yarn install")
+    if any(f.endswith("requirements.txt") for f in files):
+        lines.append("pip install -r requirements.txt")
+    if any(f.endswith("Package.swift") for f in files):
+        lines.append("swift package resolve")
+    if any(f.endswith("build.gradle") or f.endswith("build.gradle.kts") for f in files):
+        lines.append("./gradlew build")
+    lines.append("```")
+    lines.append("")
+
+    lines.append("## Como ejecutar")
+    lines.append("")
+    lines.append("Revisa los `scripts` del `package.json` raiz o el README de cada sub-proyecto. Comandos tipicos:")
+    lines.append("")
+    lines.append("```bash")
+    lines.append("pnpm dev       # backend Node/TS")
+    lines.append("swift run      # iOS/macOS SwiftPM executable")
+    lines.append("./gradlew run  # Android")
+    lines.append("```")
+    lines.append("")
+
+    lines.append("## Tests")
+    lines.append("")
+    if isinstance(tests, dict) and tests:
+        for suite, info in tests.items():
+            if isinstance(info, dict):
+                cmd = info.get("run_command") or info.get("command")
+                if cmd:
+                    lines.append(f"- **{suite}**: `{cmd}`")
+    else:
+        lines.append("- `pnpm test` / `swift test` / `pytest` segun el stack.")
+    lines.append("")
+
+    if mv_tasks:
+        lines.append("## Validacion manual")
+        lines.append("")
+        lines.append("Estas tareas no se pudieron validar automaticamente en el sandbox de ADLC. Corrélas antes de mergear.")
+        lines.append("")
+        for i, t in enumerate(mv_tasks, 1):
+            if not isinstance(t, dict):
+                continue
+            title = t.get("task") or t.get("id") or f"Tarea {i}"
+            lines.append(f"### {i}. {title}")
+            why = t.get("why") or t.get("expected_result")
+            if why:
+                lines.append(f"**Contexto:** {why}")
+            cmd = t.get("command")
+            if cmd:
+                lines.append("```bash")
+                lines.append(cmd)
+                lines.append("```")
+            lines.append("")
+
+    lines.append("## Estructura")
+    lines.append("")
+    if files:
+        lines.append("```")
+        for f in sorted(set(files))[:40]:
+            lines.append(f)
+        lines.append("```")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("_README auto-generado por ADLC post-coding gate: el coding agent no incluyo uno. Revisalo y ajusta lo necesario antes de mergear._")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _inject_readme_into_tar(tar_path: str, readme_content: str) -> bool:
+    """Agrega README.md en la raiz del tar.gz. Devuelve True si lo inyecto."""
+    if not os.path.exists(tar_path):
+        return False
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(tmp_fd)
+        data = readme_content.encode("utf-8")
+        with tarfile.open(tar_path, "r:gz") as src, tarfile.open(tmp_path, "w:gz") as dst:
+            for member in src.getmembers():
+                if os.path.basename(member.name).lower() == "readme.md":
+                    continue
+                f = src.extractfile(member) if member.isfile() else None
+                dst.addfile(member, f)
+            info = tarfile.TarInfo(name="repo/README.md")
+            info.size = len(data)
+            info.mode = 0o644
+            dst.addfile(info, io.BytesIO(data))
+        os.replace(tmp_path, tar_path)
+        return True
+    except (tarfile.TarError, OSError):
+        return False
+
+
+def _autoheal_readme(state: dict[str, Any]) -> bool:
+    """Si falta README en files_modified, intenta autohealing.
+    Returns True si el state quedo coherente (README presente en files_modified).
+    Mutate state in-place: files_modified += 'README.md' (si lo sintetizamos/encontramos)."""
+    tar = _coding_workspace_tar(state)
+    files = state.get("files_modified") or []
+    if not isinstance(files, list):
+        return False
+
+    # Caso 1: README existe en el tar pero el agente no lo listo → agregarlo.
+    if tar and os.path.exists(tar) and _tar_has_readme(tar):
+        files.append("README.md")
+        state["files_modified"] = files
+        return True
+
+    # Caso 2: README no existe. Sintetizar + inyectar en el tar.
+    if tar and os.path.exists(tar):
+        content = _render_readme_from_state(state)
+        if _inject_readme_into_tar(tar, content):
+            files.append("README.md")
+            state["files_modified"] = files
+            state["_autogenerated_readme"] = True
+            return True
+
+    return False
+
+
 def gate_post_coding(state: dict[str, Any]) -> GateResult:
     """
     Corre despues de coding. Chequeos:
       1. README.md presente en files_modified (obligatorio, independiente del stack).
+         Si falta, auto-heal: sintetiza README desde state + inyecta en el tar.
       2. Si el contrato exige node/ts, los files_modified deben tener .ts / package.json.
          Si exige python, .py / requirements.txt. No valida contenido —
          solo extensiones/manifests.
@@ -285,10 +474,16 @@ def gate_post_coding(state: dict[str, Any]) -> GateResult:
         for p in paths
     )
     if not has_readme:
-        violations.append(
-            "coding.files_modified no incluye un README.md (requerido: el "
-            "humano reviewer debe poder clonar + correr siguiendo el README)"
-        )
+        # Auto-heal: si el tar del workspace tiene un README (el agente lo
+        # creo pero no lo listo), o si podemos sintetizar uno desde el state,
+        # lo inyectamos y seguimos. El reviewer igual recibe un README.
+        if _autoheal_readme(state):
+            has_readme = True
+        else:
+            violations.append(
+                "coding.files_modified no incluye un README.md (requerido: el "
+                "humano reviewer debe poder clonar + correr siguiendo el README)"
+            )
 
     # Stack checks (solo si hay contrato).
     contract = _get_stack_contract(state)
