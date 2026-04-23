@@ -132,7 +132,11 @@ class ClaudeCLIProvider(LLMProvider):
             "-p",
             "--output-format", "json",
             "--model", effective_model,
-            "--max-turns", "1",
+            # max-turns=5 (no 1): con --tools "" las built-in estan deshabilitadas
+            # pero Haiku a veces emite un tool_use block igual. Con max-turns=1
+            # el run muere con error_max_turns y result vacio. Con 5, la CLI le
+            # responde "tool no disponible" al modelo y este emite texto final.
+            "--max-turns", "5",
             # Deshabilitar TODAS las tools built-in de Claude Code.
             # --tools "" elimina Read/Write/Bash/etc del prompt del modelo.
             "--tools", "",
