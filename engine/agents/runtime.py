@@ -89,6 +89,8 @@ async def run_agent(
     max_cost = spec.budget.max_cost_usd
 
     final_text: str | None = None
+    tools_used: set[str] = set()
+    sandbox_nudge_attempts = 0
 
     while iteration < max_iterations:
         iteration += 1
@@ -180,6 +182,7 @@ async def run_agent(
             messages.append(Message(role="assistant", content=assistant_turn))
 
             for tc in response.tool_calls:
+                tools_used.add(tc.name)
                 run_log(
                     context.run_id,
                     f"[runtime] {spec.name} iter={iteration} tool_call "
@@ -260,6 +263,51 @@ async def run_agent(
             if spec.writes:
                 nudge += " Campos requeridos: " + ", ".join(spec.writes)
             messages.append(Message(role="user", content=nudge))
+            continue  # siguiente iter del while
+
+        # Guard: si sandbox_run esta disponible pero el modelo intenta dar
+        # final_answer sin haberlo llamado nunca, empujamos para que al menos
+        # lo corra una vez. Sin esto, el coding agent puede declarar
+        # files_modified sin que los archivos existan en el workspace, y
+        # el snapshot queda vacio (nada para publicar ni validar).
+        # Max 2 nudges: si el modelo insiste en no usar sandbox_run, aceptamos
+        # la respuesta (otros gates la rechazaran si hace falta).
+        if (
+            "sandbox_run" in tool_by_name
+            and "sandbox_run" not in tools_used
+            and sandbox_nudge_attempts < 2
+        ):
+            sandbox_nudge_attempts += 1
+            run_log(
+                context.run_id,
+                f"[runtime] {spec.name} iter={iteration} final_without_sandbox_run "
+                f"(attempt {sandbox_nudge_attempts}) — nudging",
+            )
+            if tracer:
+                tracer.event(
+                    "sandbox_run_nudge",
+                    run_id=context.run_id,
+                    agent=spec.name,
+                    iteration=iteration,
+                    attempt=sandbox_nudge_attempts,
+                )
+            messages.append(Message(role="assistant", content=response.content or ""))
+            messages.append(Message(
+                role="user",
+                content=(
+                    "NO aceptamos final_answer todavia. `files_modified` no es una "
+                    "declaracion — es el RESULTADO REAL de archivos que creaste en "
+                    "/workspace/repo via `sandbox_run`. Nunca llamaste a sandbox_run "
+                    "en este run, asi que NO hay workspace, NO hay tar snapshot, y "
+                    "NO hay nada que publicar.\n\n"
+                    "Responde AHORA con un JSON `{\"tool_use\": {\"name\": \"sandbox_run\", "
+                    "\"input\": {...}}}` que cree los archivos del primer batch "
+                    "(heredocs `cat > path <<'EOF' ... EOF`). Usa repo_url=\"\" si "
+                    "project_type=greenfield. Despues de ejecutar sandbox_run (exitoso) "
+                    "vas a poder dar final_answer.\n\n"
+                    "NO emitas final_answer. Emite SOLO el JSON de tool_use."
+                ),
+            ))
             continue  # siguiente iter del while
 
         final_text = response.content
