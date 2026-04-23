@@ -275,7 +275,7 @@ async def run_agent(
         if (
             "sandbox_run" in tool_by_name
             and "sandbox_run" not in tools_used
-            and sandbox_nudge_attempts < 2
+            and sandbox_nudge_attempts < 4
         ):
             sandbox_nudge_attempts += 1
             run_log(
@@ -295,17 +295,30 @@ async def run_agent(
             messages.append(Message(
                 role="user",
                 content=(
-                    "NO aceptamos final_answer todavia. `files_modified` no es una "
-                    "declaracion — es el RESULTADO REAL de archivos que creaste en "
-                    "/workspace/repo via `sandbox_run`. Nunca llamaste a sandbox_run "
-                    "en este run, asi que NO hay workspace, NO hay tar snapshot, y "
-                    "NO hay nada que publicar.\n\n"
-                    "Responde AHORA con un JSON `{\"tool_use\": {\"name\": \"sandbox_run\", "
-                    "\"input\": {...}}}` que cree los archivos del primer batch "
-                    "(heredocs `cat > path <<'EOF' ... EOF`). Usa repo_url=\"\" si "
-                    "project_type=greenfield. Despues de ejecutar sandbox_run (exitoso) "
-                    "vas a poder dar final_answer.\n\n"
-                    "NO emitas final_answer. Emite SOLO el JSON de tool_use."
+                    "STOP. Tu respuesta es incorrecta.\n\n"
+                    "`sandbox_run` ESTA disponible — es una de las tools listadas en "
+                    "tu system prompt arriba. NO confundas esto con las tools del "
+                    "entorno general de Claude Code (Read/Bash/PushNotification/etc): "
+                    "aquellas estan DESHABILITADAS. Las unicas tools que podes usar "
+                    "son las del bloque 'Available tools:' del system prompt, y "
+                    "sandbox_run es UNA DE ELLAS.\n\n"
+                    "Para invocarla responde con UN SOLO objeto JSON, sin prosa, "
+                    "sin markdown:\n\n"
+                    "{\"tool_use\": {\"id\": \"run1\", \"name\": \"sandbox_run\", "
+                    "\"input\": {\"repo_url\": \"\", \"branch\": \"main\", "
+                    "\"commands\": [\"mkdir -p src\", \"cat > src/index.ts <<'EOF'\\n"
+                    "...\\nEOF\"]}}}\n\n"
+                    "Reglas:\n"
+                    "- repo_url=\"\" si project_type es greenfield (no hay repo remoto).\n"
+                    "- `commands` es un array de comandos shell que se ejecutan en "
+                    "/workspace/repo.\n"
+                    "- Usa heredocs `cat > path <<'EOF' ... EOF` para archivos "
+                    "multi-linea.\n"
+                    "- NO emitas final_answer. Solo tool_use.\n"
+                    "- `files_modified` vacio NO es aceptable: tenes que crear "
+                    "archivos REALES via sandbox_run. Declarar paths sin ejecutar "
+                    "sandbox_run es alucinar.\n\n"
+                    "Responde AHORA con SOLO el JSON de tool_use."
                 ),
             ))
             continue  # siguiente iter del while

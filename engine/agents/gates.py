@@ -456,9 +456,24 @@ def gate_post_coding(state: dict[str, Any]) -> GateResult:
     """
     files = state.get("files_modified")
     if not isinstance(files, list) or not files:
-        # Sin files_modified no hay nada que validar. Deja pasar (otros
-        # mecanismos lo atrapan: validation, required_outputs).
-        return GateResult.ok()
+        # Rechazar: un coding phase que no modifico ningun archivo significa
+        # que el agente no ejecuto sandbox_run (o lo ejecuto pero no hubo
+        # diff). Sin archivos no hay nada que publicar ni validar. El
+        # reviewer humano vendria a un repo vacio — es un fracaso silencioso
+        # si lo dejamos pasar. Mejor fallar y forzar retry con hint claro.
+        violations = [
+            "coding.files_modified esta vacio: el coding agent no creo "
+            "ningun archivo. Probablemente no llamo a sandbox_run."
+        ]
+        hint = _build_retry_hint(violations, _get_stack_contract(state) or {})
+        hint += (
+            "\n\nIMPORTANTE — files_modified vacio. Tu trabajo NO se hizo. "
+            "Tenes que LLAMAR A `sandbox_run` para crear los archivos del "
+            "primer batch (usa heredocs `cat > path <<'EOF' ... EOF`). "
+            "Solo DESPUES de sandbox_run (con exit_code=0 o los archivos "
+            "creados) podes dar final_answer con files_modified POBLADO."
+        )
+        return GateResult.fail(violations, hint)
 
     paths = [_norm(f) for f in files if isinstance(f, str)]
     joined = " ".join(paths)
